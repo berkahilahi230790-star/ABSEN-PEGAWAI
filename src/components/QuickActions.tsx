@@ -11,6 +11,7 @@ import {
   Sparkles,
   ShieldAlert,
   UserCog,
+  Palette,
 } from "lucide-react";
 import { AttendanceRecord, CompanyBranding, UserRole, WorkScheduleConfig } from "../types";
 import { getThemeClasses } from "../utils/theme";
@@ -27,6 +28,7 @@ interface QuickActionsProps {
   onOpenChat: () => void;
   onOpenReports: () => void;
   onOpenSettings: () => void;
+  onOpenBranding?: () => void;
   onOpenOfficeRadar: () => void;
   onOpenIdentity?: () => void;
   onOpenChangePassword?: () => void;
@@ -46,6 +48,7 @@ export const QuickActions: React.FC<QuickActionsProps> = ({
   onOpenChat,
   onOpenReports,
   onOpenSettings,
+  onOpenBranding,
   onOpenOfficeRadar,
   onOpenIdentity,
   onOpenChangePassword,
@@ -225,13 +228,19 @@ export const QuickActions: React.FC<QuickActionsProps> = ({
     },
     {
       id: "action-pengaturan-branding",
-      title: "Dasbor Manajerial",
-      desc: "Persetujuan & Jam Fleksibel",
-      icon: ShieldAlert,
-      gradient: "from-slate-700 to-slate-900",
-      badge: "Admin",
-      badgeColor: "bg-amber-100 text-amber-800 font-bold",
-      onClick: onOpenSettings,
+      title: "Branding & Banner",
+      desc: "Logo, Banner & Tema",
+      icon: Palette,
+      gradient: "from-blue-700 to-indigo-800",
+      badge: "Kustomisasi",
+      badgeColor: "bg-blue-100 text-blue-800 font-bold",
+      onClick: () => {
+        if (onOpenBranding) {
+          onOpenBranding();
+        } else {
+          onOpenSettings();
+        }
+      },
     },
   ];
 

@@ -41,6 +41,10 @@ export const BannerSlider: React.FC<BannerSliderProps> = ({ banners, onCtaClick 
         alt={current.title}
         className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
         referrerPolicy="no-referrer"
+        onError={(e) => {
+          (e.target as HTMLImageElement).src =
+            "https://images.unsplash.com/photo-1497215728101-856f4ea42174?w=800&auto=format&fit=crop&q=80";
+        }}
       />
 
       <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/40 to-slate-900/20 flex flex-col justify-end p-3.5 text-white">

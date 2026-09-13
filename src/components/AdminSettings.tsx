@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Clock,
   MapPin,
@@ -16,6 +16,11 @@ import {
   Sliders,
   Shield,
   Layers,
+  FileImage,
+  X,
+  Check,
+  Eye,
+  Camera,
 } from "lucide-react";
 import { BannerInfo, CompanyBranding, EmployeeProfile, WorkScheduleConfig } from "../types";
 import { audioNotificationService } from "../services/audioNotification";
@@ -27,6 +32,7 @@ interface AdminSettingsProps {
   onSaveBranding: (branding: CompanyBranding) => void;
   employees: EmployeeProfile[];
   onUpdateEmployeeQuota: (employeeId: string, newQuota: number) => void;
+  initialSubTab?: "schedule" | "gps" | "leave" | "branding";
 }
 
 export const AdminSettings: React.FC<AdminSettingsProps> = ({
@@ -36,8 +42,15 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   onSaveBranding,
   employees,
   onUpdateEmployeeQuota,
+  initialSubTab = "schedule",
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<"schedule" | "gps" | "leave" | "branding">("schedule");
+  const [activeSubTab, setActiveSubTab] = useState<"schedule" | "gps" | "leave" | "branding">(initialSubTab);
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
 
   // Local state for Schedule
   const [workConfig, setWorkConfig] = useState<WorkScheduleConfig>({ ...schedule });
@@ -50,6 +63,10 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   const [newBannerSubtitle, setNewBannerSubtitle] = useState("");
   const [newBannerBadge, setNewBannerBadge] = useState("Info Kantor");
   const [newBannerImg, setNewBannerImg] = useState("");
+  const [newBannerCta, setNewBannerCta] = useState("Lihat");
+  const [bannerUploadFileName, setBannerUploadFileName] = useState("");
+  const [isBannerDragging, setIsBannerDragging] = useState(false);
+  const bannerFileInputRef = useRef<HTMLInputElement>(null);
 
   const [saveToast, setSaveToast] = useState(false);
 
@@ -58,6 +75,34 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     { name: "Tech Blue", url: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=120&auto=format&fit=crop&q=80" },
     { name: "Modern Retail", url: "https://images.unsplash.com/photo-1557804506-669a67965ba0?w=120&auto=format&fit=crop&q=80" },
     { name: "Corporate Hub", url: "https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=120&auto=format&fit=crop&q=80" },
+  ];
+
+  // Curated Banner Presets
+  const bannerPresets = [
+    {
+      title: "Disiplin Presensi & Apel Pagi",
+      subtitle: "Presensi tepat waktu sebelum jam 08.00 untuk mendapatkan poin kinerja",
+      badge: "Disiplin",
+      url: "https://images.unsplash.com/photo-1497215728101-856f4ea42174?w=900&auto=format&fit=crop&q=80",
+    },
+    {
+      title: "Pemberitahuan Cuti Bersama & Libur",
+      subtitle: "Pengajuan cuti dapat dilakukan melalui aplikasi minimal H-3 sebelum libur",
+      badge: "Info Cuti",
+      url: "https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=900&auto=format&fit=crop&q=80",
+    },
+    {
+      title: "Apresiasi Pegawai Terbaik Bulan Ini",
+      subtitle: "Selamat kepada pegawai dengan rekor kehadiran 100% tanpa terlambat",
+      badge: "Penghargaan",
+      url: "https://images.unsplash.com/photo-1552664730-d307ca884978?w=900&auto=format&fit=crop&q=80",
+    },
+    {
+      title: "Gathering & Rapat Evaluasi Kinerja",
+      subtitle: "Seluruh divisi dimohon hadir tepat waktu di ruang pertemuan utama",
+      badge: "Acara Kantor",
+      url: "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=900&auto=format&fit=crop&q=80",
+    },
   ];
 
   // Save Schedule settings
@@ -100,19 +145,89 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     }
   };
 
+  // Process Banner File Upload
+  const processBannerFile = (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      alert("Harap unggah file gambar yang valid (JPG, PNG, WebP, SVG).");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setNewBannerImg(reader.result);
+        setBannerUploadFileName(file.name);
+        audioNotificationService.playChime("normal");
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleBannerFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processBannerFile(file);
+    }
+  };
+
+  const handleClearBannerImage = () => {
+    setNewBannerImg("");
+    setBannerUploadFileName("");
+    if (bannerFileInputRef.current) {
+      bannerFileInputRef.current.value = "";
+    }
+  };
+
+  // Update existing banner image upload
+  const handleUpdateExistingBannerImage = (bannerId: string, file: File) => {
+    if (!file.type.startsWith("image/")) {
+      alert("Harap unggah file gambar yang valid (JPG, PNG, WebP).");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        const updated = {
+          ...brandConfig,
+          banners: brandConfig.banners.map((b) =>
+            b.id === bannerId ? { ...b, imageUrl: reader.result as string } : b
+          ),
+        };
+        setBrandConfig(updated);
+        onSaveBranding(updated);
+        showSuccess();
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Toggle existing banner active state
+  const handleToggleBannerActive = (bannerId: string) => {
+    const updated = {
+      ...brandConfig,
+      banners: brandConfig.banners.map((b) =>
+        b.id === bannerId ? { ...b, active: !b.active } : b
+      ),
+    };
+    setBrandConfig(updated);
+    onSaveBranding(updated);
+  };
+
   // Add Banner
   const handleAddBanner = () => {
-    if (!newBannerTitle.trim()) return;
+    if (!newBannerTitle.trim()) {
+      alert("Silakan masukkan judul banner terlebih dahulu.");
+      return;
+    }
     const newBanner: BannerInfo = {
       id: `b-${Date.now()}`,
-      title: newBannerTitle,
-      subtitle: newBannerSubtitle || "Informasi pengumuman penting perusahaan",
-      badge: newBannerBadge || "Pengumuman",
+      title: newBannerTitle.trim(),
+      subtitle: newBannerSubtitle.trim() || "Informasi pengumuman penting perusahaan",
+      badge: newBannerBadge.trim() || "Pengumuman",
       imageUrl:
-        newBannerImg ||
+        newBannerImg.trim() ||
         "https://images.unsplash.com/photo-1497215728101-856f4ea42174?w=900&auto=format&fit=crop&q=80",
       active: true,
-      ctaText: "Lihat",
+      ctaText: newBannerCta.trim() || "Lihat",
     };
     const updated = {
       ...brandConfig,
@@ -123,6 +238,12 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     setNewBannerTitle("");
     setNewBannerSubtitle("");
     setNewBannerImg("");
+    setNewBannerBadge("Info Kantor");
+    setNewBannerCta("Lihat");
+    setBannerUploadFileName("");
+    if (bannerFileInputRef.current) {
+      bannerFileInputRef.current.value = "";
+    }
     showSuccess();
   };
 
@@ -136,12 +257,24 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     onSaveBranding(updated);
   };
 
-  // Handle Logo Upload
+  // Handle Logo Upload with FileReader (Persists in localStorage)
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const url = URL.createObjectURL(file);
-      setBrandConfig({ ...brandConfig, logoUrl: url });
+      if (!file.type.startsWith("image/")) {
+        alert("Harap pilih file gambar logo (JPG, PNG, WebP, SVG).");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          const updated = { ...brandConfig, logoUrl: reader.result };
+          setBrandConfig(updated);
+          onSaveBranding(updated);
+          showSuccess();
+        }
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -618,83 +751,384 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
           </div>
 
           {/* Banner Management */}
-          <div className="pt-2 border-t border-slate-100 space-y-3">
-            <h4 className="font-bold text-slate-800 text-xs">
-              Banner Informasi / Promosi Dashboard ({brandConfig.banners.length})
-            </h4>
-
-            {/* Add New Banner Form */}
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 text-[11px]">
-              <span className="font-bold text-slate-700 block">Tambah Informasi Banner Baru</span>
-              <input
-                type="text"
-                placeholder="Judul Banner (misal: Disiplin Presensi Berhadiah)"
-                value={newBannerTitle}
-                onChange={(e) => setNewBannerTitle(e.target.value)}
-                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl"
-              />
-              <input
-                type="text"
-                placeholder="Sub-judul / Penjelasan ringkas..."
-                value={newBannerSubtitle}
-                onChange={(e) => setNewBannerSubtitle(e.target.value)}
-                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl"
-              />
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="text"
-                  placeholder="Label Badge (misal: Reward)"
-                  value={newBannerBadge}
-                  onChange={(e) => setNewBannerBadge(e.target.value)}
-                  className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl"
-                />
-                <input
-                  type="text"
-                  placeholder="URL Foto Banner (opsional)"
-                  value={newBannerImg}
-                  onChange={(e) => setNewBannerImg(e.target.value)}
-                  className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl"
-                />
+          <div className="pt-3 border-t border-slate-100 space-y-3.5">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                  <Image className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Banner Promosi & Pengumuman Dashboard</span>
+                </h4>
+                <p className="text-[10px] text-slate-500">
+                  Unggah gambar banner promosi, pengumuman kantor, atau agenda pegawai untuk slider dashboard
+                </p>
               </div>
+              <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[10px] font-bold border border-blue-200">
+                {brandConfig.banners.length} Banner
+              </span>
+            </div>
+
+            {/* Form Tambah Banner Baru */}
+            <div className="p-3.5 bg-slate-50 border border-slate-200/90 rounded-2xl space-y-3 text-[11px]">
+              <div className="flex items-center justify-between border-b border-slate-200/70 pb-2">
+                <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <Plus className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Tambah Banner Baru</span>
+                </span>
+                {newBannerImg && (
+                  <span className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1">
+                    <Check className="w-3 h-3" />
+                    <span>Gambar Terpasang</span>
+                  </span>
+                )}
+              </div>
+
+              {/* INPUT UPLOAD GAMBAR BANNER */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Upload Gambar Banner <span className="text-rose-500">*</span>
+                </label>
+
+                {/* Hidden File Input */}
+                <input
+                  ref={bannerFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleBannerFileUpload}
+                  className="hidden"
+                  id="banner-file-input"
+                />
+
+                {/* Kondisi 1: Gambar sudah dipilih/diunggah -> Tampilkan Preview Visual */}
+                {newBannerImg ? (
+                  <div className="relative rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 group shadow-xs">
+                    <div className="aspect-[16/6] w-full relative overflow-hidden">
+                      <img
+                        src={newBannerImg}
+                        alt="Preview Banner"
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                      {/* Gradient Overlay & Preview Text */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/30 to-transparent flex flex-col justify-end p-3 text-white">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="px-2 py-0.5 rounded bg-blue-600/90 text-[9px] font-bold uppercase tracking-wider">
+                            {newBannerBadge || "Pengumuman"}
+                          </span>
+                          {bannerUploadFileName && (
+                            <span className="text-[9px] text-slate-300 truncate max-w-[200px]">
+                              File: {bannerUploadFileName}
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="font-bold text-xs line-clamp-1">
+                          {newBannerTitle || "Judul Banner Anda"}
+                        </h4>
+                        <p className="text-[10px] text-slate-200 line-clamp-1">
+                          {newBannerSubtitle || "Sub-judul / keterangan singkat banner"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Action Bar Preview */}
+                    <div className="p-2 bg-slate-900/95 flex items-center justify-between gap-2 border-t border-slate-800">
+                      <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
+                        <Check className="w-3 h-3" />
+                        <span>Pratinjau Tampilan Dashboard</span>
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => bannerFileInputRef.current?.click()}
+                          className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white font-semibold text-[10px] transition-all flex items-center gap-1"
+                        >
+                          <UploadCloud className="w-3 h-3" />
+                          <span>Ganti Gambar</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleClearBannerImage}
+                          className="px-2 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-semibold text-[10px] transition-all flex items-center gap-1"
+                          title="Hapus gambar terpilih"
+                        >
+                          <X className="w-3 h-3" />
+                          <span>Hapus</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* Kondisi 2: Belum ada gambar -> Dropzone Drag-and-Drop & Upload Button */
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setIsBannerDragging(true);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      setIsBannerDragging(false);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsBannerDragging(false);
+                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        processBannerFile(e.dataTransfer.files[0]);
+                      }
+                    }}
+                    onClick={() => bannerFileInputRef.current?.click()}
+                    className={`border-2 border-dashed rounded-2xl p-4 sm:p-5 flex flex-col items-center justify-center text-center cursor-pointer transition-all ${
+                      isBannerDragging
+                        ? "border-blue-500 bg-blue-50/80 scale-[1.01]"
+                        : "border-slate-300 hover:border-blue-400 bg-white hover:bg-slate-50/80"
+                    }`}
+                  >
+                    <div className="w-11 h-11 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 mb-2 shadow-2xs">
+                      <UploadCloud className="w-5 h-5" />
+                    </div>
+                    <span className="font-bold text-slate-800 text-xs mb-0.5">
+                      Klik untuk Upload Foto Banner
+                    </span>
+                    <span className="text-[10px] text-slate-500 mb-2 max-w-xs">
+                      Tarik & lepas file gambar dari perangkat Anda di sini (JPG, PNG, WebP, SVG)
+                    </span>
+                    <span className="px-3 py-1 rounded-xl bg-blue-600 text-white font-bold text-[10px] shadow-xs hover:bg-blue-700 transition-all flex items-center gap-1">
+                      <FileImage className="w-3 h-3" />
+                      <span>Pilih File Dari Komputer / HP</span>
+                    </span>
+                  </div>
+                )}
+
+                {/* Preset Galeri Gambar Banner Cepat */}
+                <div className="mt-2.5 space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 font-semibold">
+                    <span>Atau pilih dari Preset Gambar Banner:</span>
+                    <span className="text-[9px] text-blue-600">(1-Klik Terapkan)</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                    {bannerPresets.map((preset, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setNewBannerTitle(preset.title);
+                          setNewBannerSubtitle(preset.subtitle);
+                          setNewBannerBadge(preset.badge);
+                          setNewBannerImg(preset.url);
+                          setBannerUploadFileName(`Preset: ${preset.badge}`);
+                        }}
+                        className="p-1.5 rounded-xl border border-slate-200 bg-white hover:border-blue-400 hover:bg-blue-50/40 text-left transition-all group flex flex-col gap-1"
+                      >
+                        <div className="w-full aspect-[16/8] rounded-lg overflow-hidden relative bg-slate-100">
+                          <img
+                            src={preset.url}
+                            alt={preset.title}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                            referrerPolicy="no-referrer"
+                          />
+                          <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/70 text-white text-[8px] font-bold">
+                            {preset.badge}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-700 truncate block">
+                          {preset.badge}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Input URL Alternatif */}
+                <div className="mt-2 pt-2 border-t border-slate-200/60">
+                  <label className="block text-[10px] text-slate-500 font-semibold mb-1">
+                    Atau masukkan tautan URL Gambar eksternal:
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://example.com/banner.jpg"
+                    value={newBannerImg.startsWith("data:") ? "" : newBannerImg}
+                    onChange={(e) => {
+                      setNewBannerImg(e.target.value);
+                      setBannerUploadFileName("URL Web");
+                    }}
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl text-[10px] focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Input Detail Banner (Judul, Subjudul, Badge, CTA) */}
+              <div className="space-y-2 pt-1 border-t border-slate-200/70">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-700 mb-0.5">
+                    Judul Banner <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: Disiplin Presensi & Apel Pagi Hari Ini"
+                    value={newBannerTitle}
+                    onChange={(e) => setNewBannerTitle(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-700 mb-0.5">
+                    Sub-judul / Penjelasan Ringkas
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: Seluruh pegawai wajib mengisi presensi sebelum 08.00 WIB"
+                    value={newBannerSubtitle}
+                    onChange={(e) => setNewBannerSubtitle(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-700 mb-0.5">
+                      Label Badge
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Misal: Info, Reward, Penting"
+                      value={newBannerBadge}
+                      onChange={(e) => setNewBannerBadge(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-700 mb-0.5">
+                      Teks Tombol Aksi (CTA)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Misal: Lihat, Detail, Absen"
+                      value={newBannerCta}
+                      onChange={(e) => setNewBannerCta(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Tombol Simpan Banner Baru */}
               <button
                 type="button"
                 onClick={handleAddBanner}
-                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center gap-1 active:scale-95 transition-all text-xs"
+                className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center justify-center gap-1.5 active:scale-95 transition-all text-xs shadow-xs"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Tambah Banner ke Dashboard</span>
+                <span>Tambahkan Banner ke Slider Dashboard</span>
               </button>
             </div>
 
             {/* List of current banners */}
             <div className="space-y-2">
-              {brandConfig.banners.map((b) => (
-                <div
-                  key={b.id}
-                  className="p-2.5 bg-white border border-slate-200 rounded-xl flex items-center justify-between gap-2"
-                >
-                  <div className="flex items-center gap-2">
-                    <img
-                      src={b.imageUrl}
-                      alt={b.title}
-                      className="w-12 h-9 rounded-lg object-cover border border-slate-200 shrink-0"
-                    />
-                    <div className="truncate">
-                      <span className="font-bold text-slate-800 text-[11px] block truncate">
-                        {b.title}
-                      </span>
-                      <span className="text-[10px] text-slate-400 block truncate">{b.subtitle}</span>
+              <span className="font-bold text-slate-700 text-[11px] block">
+                Daftar Banner yang Sedang Aktif ({brandConfig.banners.length})
+              </span>
+
+              {brandConfig.banners.length === 0 ? (
+                <div className="p-4 rounded-xl border border-dashed border-slate-200 text-center text-slate-400 text-xs">
+                  Belum ada banner. Silakan unggah banner baru di atas.
+                </div>
+              ) : (
+                brandConfig.banners.map((b) => (
+                  <div
+                    key={b.id}
+                    className="p-3 bg-white border border-slate-200/90 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs hover:border-slate-300 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="relative w-16 h-12 rounded-xl overflow-hidden bg-slate-900 border border-slate-200 shrink-0 group">
+                        <img
+                          src={b.imageUrl}
+                          alt={b.title}
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                        {/* Hidden replace input for this banner */}
+                        <label
+                          className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white cursor-pointer transition-opacity"
+                          title="Ganti gambar banner ini"
+                        >
+                          <Camera className="w-4 h-4" />
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleUpdateExistingBannerImage(b.id, file);
+                            }}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          {b.badge && (
+                            <span className="px-1.5 py-0.2 rounded bg-blue-100 text-blue-800 text-[9px] font-bold">
+                              {b.badge}
+                            </span>
+                          )}
+                          <span
+                            className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                              b.active
+                                ? "bg-emerald-100 text-emerald-800"
+                                : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            {b.active ? "Aktif" : "Nonaktif"}
+                          </span>
+                        </div>
+                        <h5 className="font-bold text-slate-800 text-xs truncate leading-tight">
+                          {b.title}
+                        </h5>
+                        <p className="text-[10px] text-slate-400 truncate">{b.subtitle}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-1.5 shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100">
+                      {/* Tombol Upload Ganti Gambar */}
+                      <label className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer transition-colors flex items-center gap-1">
+                        <UploadCloud className="w-3 h-3 text-blue-600" />
+                        <span>Ganti Gambar</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleUpdateExistingBannerImage(b.id, file);
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+
+                      {/* Tombol Toggle Aktif/Nonaktif */}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleBannerActive(b.id)}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors ${
+                          b.active
+                            ? "bg-amber-50 text-amber-700 hover:bg-amber-100"
+                            : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                        }`}
+                      >
+                        {b.active ? "Nonaktifkan" : "Aktifkan"}
+                      </button>
+
+                      {/* Tombol Hapus */}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveBanner(b.id)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                        title="Hapus banner ini"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
-                  <button
-                    onClick={() => handleRemoveBanner(b.id)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
-                    title="Hapus banner"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
 
@@ -703,7 +1137,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
             className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition-all"
           >
             <Save className="w-4 h-4" />
-            <span>Terapkan Seluruh Branding & Tema</span>
+            <span>Terapkan Seluruh Branding & Banner</span>
           </button>
         </div>
       )}

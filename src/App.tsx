@@ -86,6 +86,12 @@ export default function App() {
 
   // Active Main Navigation Tab
   const [currentView, setCurrentView] = useState<"home" | "report" | "manager" | "settings">("home");
+  const [adminSettingsSubTab, setAdminSettingsSubTab] = useState<"schedule" | "gps" | "leave" | "branding">("schedule");
+
+  const handleOpenBranding = () => {
+    setAdminSettingsSubTab("branding");
+    setCurrentView("settings");
+  };
 
   // Modals
   const [attendanceModalOpen, setAttendanceModalOpen] = useState(false);
@@ -343,9 +349,9 @@ export default function App() {
     <div className={`min-h-screen bg-gradient-to-br ${getThemeBgStyle()} text-slate-800 flex flex-col font-sans transition-colors duration-500 selection:bg-blue-600 selection:text-white`}>
       {/* Header Utama Aplikasi */}
       <header className="sticky top-0 z-30 w-full bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs">
-        <div className="max-w-4xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
+        <div className="max-w-4xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3 relative">
           {/* Pojok Kiri: Logo Perusahaan (Murni Gambar Logo, Tidak Bisa Dipilih) */}
-          <div className="flex items-center gap-2.5 z-10 shrink-0 select-none pointer-events-none min-w-0">
+          <div className="flex items-center gap-2.5 z-10 shrink-0 select-none pointer-events-none sm:min-w-[120px]">
             <div
               className="w-10 h-10 rounded-xl overflow-hidden shadow-xs border border-slate-200 bg-white flex items-center justify-center p-0.5 select-none shrink-0"
               title={branding.companyName}
@@ -363,21 +369,23 @@ export default function App() {
                 </div>
               )}
             </div>
-            <div className="min-w-0">
-              <h1 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight leading-tight truncate">
-                {branding.companyName}
-              </h1>
-              <div className="flex items-center gap-1.5 text-[11px] text-blue-600 font-semibold">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                <span className="truncate">
-                  {currentRole === "manager" ? "Admin Kepegawaian" : `${currentEmployee.name} • ${currentEmployee.position}`}
-                </span>
-              </div>
+          </div>
+
+          {/* Di Tengah: Nama Perusahaan (Center) */}
+          <div className="flex-1 min-w-0 flex flex-col items-center justify-center text-center px-2 z-10">
+            <h1 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight leading-tight truncate max-w-full">
+              {branding.companyName}
+            </h1>
+            <div className="flex items-center justify-center gap-1.5 text-[11px] text-blue-600 font-semibold max-w-full">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+              <span className="truncate">
+                {currentRole === "manager" ? "Admin Kepegawaian" : `${currentEmployee.name} • ${currentEmployee.position}`}
+              </span>
             </div>
           </div>
 
           {/* Pojok Kanan: Notifikasi & Role Badge */}
-          <div className="flex items-center gap-1.5 z-10 shrink-0 relative">
+          <div className="flex items-center justify-end gap-1.5 z-10 shrink-0 relative sm:min-w-[120px]">
             {/* Lonceng Notifikasi */}
             <div className="relative">
               <button
@@ -553,7 +561,11 @@ export default function App() {
                     onOpenLeaveRequest={() => setLeaveModalOpen(true)}
                     onOpenChat={() => setChatModalOpen(true)}
                     onOpenReports={() => setCurrentView("report")}
-                    onOpenSettings={() => setCurrentView("settings")}
+                    onOpenSettings={() => {
+                      setAdminSettingsSubTab("schedule");
+                      setCurrentView("settings");
+                    }}
+                    onOpenBranding={handleOpenBranding}
                     onOpenOfficeRadar={() => setRadarModalOpen(true)}
                     onOpenAccount={() => {
                       setAccountInitialTab("identity");
@@ -708,6 +720,7 @@ export default function App() {
             {/* View: Admin Settings */}
             {currentView === "settings" && (
               <AdminSettings
+                initialSubTab={adminSettingsSubTab}
                 schedule={schedule}
                 onSaveSchedule={handleSaveSchedule}
                 branding={branding}
