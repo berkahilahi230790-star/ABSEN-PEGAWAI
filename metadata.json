@@ -1,0 +1,6 @@
+{
+  "name": "PresensiGo HR & Absensi Mobile",
+  "description": "Aplikasi absensi pegawai berbasis web mobile dengan pelacakan GPS, scan wajah AI, laporan bulanan, pengajuan izin, chat konsultasi admin real-time, pengingat suara pintar, dan kustomisasi branding.",
+  "requestFramePermissions": ["camera", "geolocation", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
