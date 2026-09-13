@@ -33,7 +33,6 @@ import {
 import { audioNotificationService } from "./services/audioNotification";
 
 // Components
-import { Navbar } from "./components/Navbar";
 import { BannerSlider } from "./components/BannerSlider";
 import { QuickActions } from "./components/QuickActions";
 import { AttendanceModal } from "./components/AttendanceModal";
@@ -70,6 +69,7 @@ import {
   User,
   HelpCircle,
   BellRing,
+  Bell,
   FileText,
 } from "lucide-react";
 
@@ -84,9 +84,6 @@ export default function App() {
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(getStoredLeaveRequests);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(getStoredChatMessages);
 
-  // Viewport mode: mobile (phone frame) vs desktop (full screen)
-  const [isMobileView, setIsMobileView] = useState(true);
-
   // Active Main Navigation Tab
   const [currentView, setCurrentView] = useState<"home" | "report" | "manager" | "settings">("home");
 
@@ -97,6 +94,7 @@ export default function App() {
   const [chatModalOpen, setChatModalOpen] = useState(false);
   const [radarModalOpen, setRadarModalOpen] = useState(false);
   const [roleModalOpen, setRoleModalOpen] = useState(false);
+  const [showMobileNotifications, setShowMobileNotifications] = useState(false);
 
   // Modals for Employee Identity, Password, and Photo / Account
   const [accountModalOpen, setAccountModalOpen] = useState(false);
@@ -339,118 +337,140 @@ export default function App() {
     }
   };
 
+  const unreadNotificationsCount = notifications.filter((n) => !n.read).length;
+
   return (
     <div className={`min-h-screen bg-gradient-to-br ${getThemeBgStyle()} text-slate-800 flex flex-col font-sans transition-colors duration-500 selection:bg-blue-600 selection:text-white`}>
-      {/* Top Navbar */}
-      <Navbar
-        branding={branding}
-        employee={currentEmployee}
-        currentRole={currentRole}
-        onToggleRole={handleToggleRole}
-        onOpenRoleSelector={() => setRoleModalOpen(true)}
-        notifications={notifications}
-        onMarkNotificationRead={handleMarkNotificationRead}
-        onClearAllNotifications={handleClearAllNotifications}
-        isMobileFrame={isMobileView}
-        onToggleMobileFrame={() => setIsMobileView(!isMobileView)}
-        onOpenProfile={() => {
-          if (currentRole === "manager") {
-            setCurrentView("settings");
-          } else {
-            setAccountInitialTab("identity");
-            setAccountModalOpen(true);
-          }
-        }}
-        onTriggerVoiceWarning={handleBroadcastLateWarning}
-      />
-
-      {/* Main Content Area: Responsive Container or Realistic Mobile Simulator Phone Frame */}
-      <div className="flex-1 flex justify-center py-2 sm:py-6 px-1 sm:px-4">
-        <div
-          className={`w-full transition-all duration-300 ${
-            isMobileView
-              ? "max-w-[420px] bg-white rounded-[38px] shadow-2xl shadow-blue-900/10 border-4 sm:border-8 border-slate-900/80 overflow-hidden flex flex-col relative"
-              : "max-w-4xl bg-white/95 backdrop-blur-md rounded-3xl shadow-xl border border-slate-200/80 overflow-hidden flex flex-col"
-          }`}
-        >
-          {/* Mobile Speaker / Camera Notch if in mobile phone frame */}
-          {isMobileView && (
-            <div className="w-full bg-slate-900 h-5 flex items-center justify-center relative shrink-0">
-              <div className="w-24 h-3 bg-black rounded-b-xl flex items-center justify-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-800" />
-                <span className="w-8 h-1 rounded-full bg-slate-800" />
-              </div>
+      {/* Header Utama Aplikasi */}
+      <header className="sticky top-0 z-30 w-full bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs">
+        <div className="max-w-4xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
+          {/* Pojok Kiri: Logo Perusahaan (Murni Gambar Logo, Tidak Bisa Dipilih) */}
+          <div className="flex items-center gap-2.5 z-10 shrink-0 select-none pointer-events-none min-w-0">
+            <div
+              className="w-10 h-10 rounded-xl overflow-hidden shadow-xs border border-slate-200 bg-white flex items-center justify-center p-0.5 select-none shrink-0"
+              title={branding.companyName}
+            >
+              {branding.logoUrl ? (
+                <img
+                  src={branding.logoUrl}
+                  alt={branding.companyName}
+                  className="w-full h-full object-contain rounded-lg"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-full h-full bg-blue-600 flex items-center justify-center text-white font-bold text-base rounded-lg">
+                  {branding.companyName.charAt(0)}
+                </div>
+              )}
             </div>
-          )}
-
-          {/* Layar Atas HP: Logo Perusahaan di pojok kiri atas, Nama Perusahaan di atas tengah */}
-          <div className="w-full bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-4 py-2.5 flex items-center justify-between relative shrink-0 shadow-xs z-20">
-            {/* Pojok Kiri Layar Atas HP: Logo Perusahaan */}
-            <div className="flex items-center gap-2 z-10 shrink-0">
-              <div
-                onClick={() => setRoleModalOpen(true)}
-                className="w-10 h-10 rounded-xl overflow-hidden shadow-xs border border-slate-200 bg-white flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all p-0.5"
-                title="Logo Perusahaan - Klik untuk ganti role"
-              >
-                {branding.logoUrl ? (
-                  <img
-                    src={branding.logoUrl}
-                    alt={branding.companyName}
-                    className="w-full h-full object-contain rounded-lg"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="w-full h-full bg-blue-600 flex items-center justify-center text-white font-bold text-base rounded-lg">
-                    {branding.companyName.charAt(0)}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Di Atas Tengah: Nama Perusahaan */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-14">
-              <h1 className="text-xs sm:text-sm font-extrabold text-slate-900 tracking-tight text-center truncate max-w-full leading-tight">
+            <div className="min-w-0">
+              <h1 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight leading-tight truncate">
                 {branding.companyName}
               </h1>
-              <div className="flex items-center gap-1 text-[10px] text-blue-600 font-semibold tracking-wide">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <div className="flex items-center gap-1.5 text-[11px] text-blue-600 font-semibold">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                 <span className="truncate">
-                  {currentRole === "manager" ? "Admin Kepegawaian" : "Presensi & Kepegawaian"}
+                  {currentRole === "manager" ? "Admin Kepegawaian" : `${currentEmployee.name} • ${currentEmployee.position}`}
                 </span>
               </div>
             </div>
-
-            {/* Pojok Kanan Layar Atas HP: Role Badge / Selector */}
-            <div className="flex items-center gap-1.5 z-10 shrink-0">
-              <button
-                onClick={() => setRoleModalOpen(true)}
-                className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border transition-all cursor-pointer ${
-                  currentRole === "manager"
-                    ? "bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100"
-                    : "bg-blue-50 text-blue-900 border-blue-300 hover:bg-blue-100"
-                }`}
-                title="Pilih Role Tampilan"
-              >
-                {currentRole === "manager" ? (
-                  <>
-                    <Shield className="w-2.5 h-2.5 text-amber-700" />
-                    <span>Admin</span>
-                  </>
-                ) : (
-                  <>
-                    <UserCheck className="w-2.5 h-2.5 text-blue-700" />
-                    <span>Pegawai</span>
-                  </>
-                )}
-              </button>
-            </div>
           </div>
 
-          {/* Body Container */}
-          <div className="flex-1 overflow-y-auto no-scrollbar flex flex-col">
-            {/* Interactive Role Switcher Selector Bar */}
-            <div className="mx-4 mt-3 mb-1 p-2 rounded-2xl bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-md flex items-center justify-between gap-2 border border-slate-800 shrink-0">
-              <div className="flex items-center gap-2 min-w-0">
+          {/* Pojok Kanan: Notifikasi & Role Badge */}
+          <div className="flex items-center gap-1.5 z-10 shrink-0 relative">
+            {/* Lonceng Notifikasi */}
+            <div className="relative">
+              <button
+                id="header-bell-btn"
+                onClick={() => setShowMobileNotifications(!showMobileNotifications)}
+                className="p-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 active:scale-95 transition-all text-slate-700 relative"
+                title="Notifikasi Sistem"
+              >
+                <Bell className="w-3.5 h-3.5" />
+                {unreadNotificationsCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-rose-500 text-white text-[8px] font-bold flex items-center justify-center animate-pulse">
+                    {unreadNotificationsCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Dropdown Notifikasi */}
+              {showMobileNotifications && (
+                <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-2.5 z-50 text-left animate-in fade-in slide-in-from-top-2">
+                  <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
+                    <div className="flex items-center gap-1">
+                      <Bell className="w-3.5 h-3.5 text-blue-600" />
+                      <span className="font-bold text-xs text-slate-900">Pemberitahuan</span>
+                    </div>
+                    {notifications.length > 0 && (
+                      <button
+                        onClick={handleClearAllNotifications}
+                        className="text-[10px] text-blue-600 hover:text-blue-800 font-medium"
+                      >
+                        Bersihkan
+                      </button>
+                    )}
+                  </div>
+                  <div className="mt-1.5 max-h-56 overflow-y-auto space-y-1.5 pr-0.5">
+                    {notifications.length === 0 ? (
+                      <div className="text-center py-4 text-slate-400 text-xs">
+                        Tidak ada pemberitahuan baru
+                      </div>
+                    ) : (
+                      notifications.map((item) => (
+                        <div
+                          key={item.id}
+                          onClick={() => handleMarkNotificationRead(item.id)}
+                          className={`p-2 rounded-xl text-xs transition-colors cursor-pointer border ${
+                            item.read
+                              ? "bg-slate-50/70 border-slate-100 text-slate-600"
+                              : "bg-blue-50/70 border-blue-100 text-slate-900 font-medium"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-1">
+                            <span className="font-semibold text-slate-900">{item.title}</span>
+                            <span className="text-[10px] text-slate-400">{item.time}</span>
+                          </div>
+                          <p className="text-slate-600 mt-0.5 text-[11px] line-clamp-2">{item.message}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Tombol Role Badge */}
+            <button
+              onClick={() => setRoleModalOpen(true)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 border transition-all cursor-pointer ${
+                currentRole === "manager"
+                  ? "bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100"
+                  : "bg-blue-50 text-blue-900 border-blue-300 hover:bg-blue-100"
+              }`}
+              title="Pilih Role Tampilan"
+            >
+              {currentRole === "manager" ? (
+                <>
+                  <Shield className="w-3 h-3 text-amber-700" />
+                  <span>Admin</span>
+                </>
+              ) : (
+                <>
+                  <UserCheck className="w-3 h-3 text-blue-700" />
+                  <span>Pegawai</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content Container */}
+      <main className="flex-1 w-full max-w-4xl mx-auto px-3 sm:px-4 py-3 flex flex-col">
+        {/* Interactive Role Switcher Selector Bar */}
+        <div className="mb-3 p-2 rounded-2xl bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-md flex items-center justify-between gap-2 border border-slate-800 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
                 <div className="w-7 h-7 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center shrink-0 border border-blue-400/30">
                   <Sparkles className="w-3.5 h-3.5 text-amber-300" />
                 </div>
@@ -696,10 +716,11 @@ export default function App() {
                 onUpdateEmployeeQuota={handleUpdateEmployeeQuota}
               />
             )}
-          </div>
+      </main>
 
-          {/* Bottom Fixed Navigation Bar (Tailored to current role) */}
-          <div className="sticky bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-slate-200/90 py-2 px-3 flex items-center justify-around z-30 shadow-lg shrink-0">
+      {/* Bottom Fixed Navigation Bar (Tailored to current role) */}
+      <nav className="sticky bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-slate-200/90 py-2 px-3 z-30 shadow-lg shrink-0">
+        <div className="max-w-md sm:max-w-lg mx-auto flex items-center justify-around">
             {currentRole === "employee" ? (
               <>
                 <button
@@ -820,8 +841,7 @@ export default function App() {
               </>
             )}
           </div>
-        </div>
-      </div>
+        </nav>
 
       {/* MODALS */}
       {/* 1. Biometric Face Detection & GPS Attendance Modal */}
