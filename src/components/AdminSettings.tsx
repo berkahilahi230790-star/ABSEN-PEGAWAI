@@ -21,9 +21,33 @@ import {
   Check,
   Eye,
   Camera,
+  FileSpreadsheet,
+  HardDrive,
+  ExternalLink,
+  LogOut,
+  AlertCircle,
 } from "lucide-react";
-import { BannerInfo, CompanyBranding, EmployeeProfile, WorkScheduleConfig } from "../types";
+import { BannerInfo, CompanyBranding, EmployeeProfile, WorkScheduleConfig, AttendanceRecord } from "../types";
 import { audioNotificationService } from "../services/audioNotification";
+import {
+  googleSignIn,
+  logoutGoogle,
+  getCurrentGoogleUser,
+  getAccessToken,
+  initAuth,
+} from "../services/googleAuth";
+import {
+  getStoredSpreadsheetId,
+  getStoredSpreadsheetUrl,
+  getGoogleAutoSyncEnabled,
+  setGoogleAutoSyncEnabled,
+  syncAllAttendanceRecords,
+  listDriveAttendanceFiles,
+  DriveFileInfo,
+  getOrCreateAttendanceSpreadsheet,
+} from "../services/googleWorkspace";
+import { WorkspaceConfirmModal } from "./WorkspaceConfirmModal";
+import { User } from "firebase/auth";
 
 interface AdminSettingsProps {
   schedule: WorkScheduleConfig;
@@ -32,7 +56,8 @@ interface AdminSettingsProps {
   onSaveBranding: (branding: CompanyBranding) => void;
   employees: EmployeeProfile[];
   onUpdateEmployeeQuota: (employeeId: string, newQuota: number) => void;
-  initialSubTab?: "schedule" | "gps" | "leave" | "branding";
+  initialSubTab?: "schedule" | "gps" | "leave" | "branding" | "google";
+  attendanceRecords?: AttendanceRecord[];
 }
 
 export const AdminSettings: React.FC<AdminSettingsProps> = ({
@@ -43,8 +68,96 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   employees,
   onUpdateEmployeeQuota,
   initialSubTab = "schedule",
+  attendanceRecords = [],
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<"schedule" | "gps" | "leave" | "branding">(initialSubTab);
+  const [activeSubTab, setActiveSubTab] = useState<"schedule" | "gps" | "leave" | "branding" | "google">(initialSubTab);
+
+  // Google Workspace States
+  const [googleUser, setGoogleUser] = useState<User | null>(getCurrentGoogleUser());
+  const [isSigningInGoogle, setIsSigningInGoogle] = useState(false);
+  const [googleAutoSync, setGoogleAutoSync] = useState<boolean>(getGoogleAutoSyncEnabled());
+  const [spreadsheetUrl, setSpreadsheetUrl] = useState<string | null>(getStoredSpreadsheetUrl());
+  const [isSyncingSheets, setIsSyncingSheets] = useState(false);
+  const [driveFiles, setDriveFiles] = useState<DriveFileInfo[]>([]);
+  const [isLoadingDriveFiles, setIsLoadingDriveFiles] = useState(false);
+  const [googleError, setGoogleError] = useState<string | null>(null);
+  const [googleConfirmOpen, setGoogleConfirmOpen] = useState(false);
+
+  useEffect(() => {
+    const unsub = initAuth(
+      (user, tok) => {
+        setGoogleUser(user);
+        if (tok) loadDriveFiles();
+      },
+      () => {
+        setGoogleUser(null);
+      }
+    );
+    return () => unsub();
+  }, []);
+
+  const loadDriveFiles = async () => {
+    setIsLoadingDriveFiles(true);
+    try {
+      const files = await listDriveAttendanceFiles();
+      setDriveFiles(files);
+    } catch (e) {
+      console.warn("Drive list error:", e);
+    } finally {
+      setIsLoadingDriveFiles(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setIsSigningInGoogle(true);
+    setGoogleError(null);
+    try {
+      const res = await googleSignIn();
+      if (res) {
+        setGoogleUser(res.user);
+        try {
+          const sheet = await getOrCreateAttendanceSpreadsheet();
+          setSpreadsheetUrl(sheet.spreadsheetUrl);
+        } catch (sErr) {}
+        loadDriveFiles();
+        showSuccess();
+      }
+    } catch (err: any) {
+      setGoogleError(err?.message || "Gagal masuk dengan akun Google.");
+    } finally {
+      setIsSigningInGoogle(false);
+    }
+  };
+
+  const handleGoogleSignOut = async () => {
+    await logoutGoogle();
+    setGoogleUser(null);
+    setDriveFiles([]);
+    showSuccess();
+  };
+
+  const handleToggleAutoSync = (checked: boolean) => {
+    setGoogleAutoSync(checked);
+    setGoogleAutoSyncEnabled(checked);
+    showSuccess();
+  };
+
+  const executeBulkSync = async () => {
+    setIsSyncingSheets(true);
+    setGoogleError(null);
+    try {
+      const result = await syncAllAttendanceRecords(attendanceRecords);
+      setSpreadsheetUrl(result.spreadsheetUrl);
+      setGoogleConfirmOpen(false);
+      showSuccess();
+      loadDriveFiles();
+    } catch (err: any) {
+      setGoogleError(err?.message || "Gagal sinkron ke Google Sheets.");
+      setGoogleConfirmOpen(false);
+    } finally {
+      setIsSyncingSheets(false);
+    }
+  };
 
   useEffect(() => {
     if (initialSubTab) {
@@ -304,10 +417,10 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
       </div>
 
       {/* Sub Tabs */}
-      <div className="grid grid-cols-4 gap-1.5 bg-slate-200/70 p-1 rounded-2xl text-xs font-bold">
+      <div className="grid grid-cols-5 gap-1 bg-slate-200/70 p-1 rounded-2xl text-xs font-bold">
         <button
           onClick={() => setActiveSubTab("schedule")}
-          className={`py-2 rounded-xl transition-all flex flex-col items-center gap-1 ${
+          className={`py-2 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${
             activeSubTab === "schedule"
               ? "bg-white text-blue-700 shadow-xs"
               : "text-slate-600 hover:text-slate-900"
@@ -318,7 +431,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         </button>
         <button
           onClick={() => setActiveSubTab("gps")}
-          className={`py-2 rounded-xl transition-all flex flex-col items-center gap-1 ${
+          className={`py-2 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${
             activeSubTab === "gps"
               ? "bg-white text-blue-700 shadow-xs"
               : "text-slate-600 hover:text-slate-900"
@@ -329,7 +442,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         </button>
         <button
           onClick={() => setActiveSubTab("leave")}
-          className={`py-2 rounded-xl transition-all flex flex-col items-center gap-1 ${
+          className={`py-2 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${
             activeSubTab === "leave"
               ? "bg-white text-blue-700 shadow-xs"
               : "text-slate-600 hover:text-slate-900"
@@ -340,7 +453,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         </button>
         <button
           onClick={() => setActiveSubTab("branding")}
-          className={`py-2 rounded-xl transition-all flex flex-col items-center gap-1 ${
+          className={`py-2 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${
             activeSubTab === "branding"
               ? "bg-white text-blue-700 shadow-xs"
               : "text-slate-600 hover:text-slate-900"
@@ -348,6 +461,17 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         >
           <Palette className="w-3.5 h-3.5" />
           <span className="text-[10px]">Branding</span>
+        </button>
+        <button
+          onClick={() => setActiveSubTab("google")}
+          className={`py-2 rounded-xl transition-all flex flex-col items-center gap-1 cursor-pointer ${
+            activeSubTab === "google"
+              ? "bg-white text-emerald-700 shadow-xs"
+              : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+          <span className="text-[10px]">G-Sheets</span>
         </button>
       </div>
 
@@ -1134,13 +1258,258 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
 
           <button
             onClick={handleSaveBranding}
-            className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition-all"
+            className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition-all cursor-pointer"
           >
             <Save className="w-4 h-4" />
             <span>Terapkan Seluruh Branding & Banner</span>
           </button>
         </div>
       )}
+
+      {/* Tab 5: Google Workspace (Sheets & Drive) */}
+      {activeSubTab === "google" && (
+        <div className="space-y-4 animate-in fade-in">
+          {/* Error notification */}
+          {googleError && (
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-2.5 text-xs text-rose-800">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-bold">Perhatian</p>
+                <p>{googleError}</p>
+              </div>
+              <button
+                onClick={() => setGoogleError(null)}
+                className="text-rose-500 hover:text-rose-700 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* Account Status Card */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Akun Google Workspace</h3>
+                <p className="text-xs text-slate-500">
+                  Autentikasi resmi untuk menyimpan data absensi ke Google Sheets & Drive
+                </p>
+              </div>
+            </div>
+
+            {!googleUser ? (
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div>
+                  <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 mb-1">
+                    Belum Terhubung
+                  </span>
+                  <h4 className="text-xs font-bold text-slate-800">Masuk untuk mengaktifkan sinkronisasi</h4>
+                  <p className="text-[11px] text-slate-500">
+                    Data presensi otomatis tersimpan aman di Google Cloud Spreadsheet Anda.
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleGoogleSignIn}
+                  disabled={isSigningInGoogle}
+                  className="inline-flex items-center gap-2.5 px-4 py-2.5 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl shadow-xs font-semibold text-xs text-slate-700 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3h3.88c2.27-2.09 3.665-5.17 3.665-9.09z" />
+                    <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.1C3.29 21.43 7.37 24 12 24z" />
+                    <path fill="#FBBC05" d="M5.28 14.32c-.25-.72-.38-1.49-.38-2.32s.13-1.6.38-2.32V6.58H1.26C.46 8.17 0 9.97 0 12s.46 3.83 1.26 5.42l4.02-3.1z" />
+                    <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.37 0 3.29 2.57 1.26 6.58l4.02 3.1c.95-2.83 3.6-4.93 6.72-4.93z" />
+                  </svg>
+                  <span>{isSigningInGoogle ? "Menghubungkan..." : "Masuk dengan Google"}</span>
+                </button>
+              </div>
+            ) : (
+              <div className="p-4 bg-emerald-50/80 border border-emerald-200 rounded-2xl flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  {googleUser.photoURL ? (
+                    <img
+                      src={googleUser.photoURL}
+                      alt={googleUser.displayName || "Google"}
+                      className="w-10 h-10 rounded-full border-2 border-emerald-300"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center text-sm">
+                      {googleUser.email?.[0].toUpperCase() || "G"}
+                    </div>
+                  )}
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-slate-800">
+                        {googleUser.displayName || "Akun Google"}
+                      </span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-100 text-emerald-800">
+                        <CheckCircle2 className="w-2.5 h-2.5 mr-0.5" /> Terhubung
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">{googleUser.email}</p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleGoogleSignOut}
+                  className="px-3 py-1.5 rounded-xl border border-rose-200 bg-white hover:bg-rose-50 text-rose-600 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Putuskan</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Google Sheets Settings */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center">
+                  <FileSpreadsheet className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Google Sheets: Rekapitulasi Presensi</h3>
+                  <p className="text-xs text-slate-500">Tabel absensi terpusat yang bisa diakses pimpinan kapan saja</p>
+                </div>
+              </div>
+
+              {spreadsheetUrl && (
+                <a
+                  href={spreadsheetUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-all shadow-2xs"
+                >
+                  <span>Buka Sheet</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+            </div>
+
+            {/* Auto-Sync Toggle */}
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/80 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold text-slate-800">Sinkronisasi Otomatis Saat Absen</p>
+                <p className="text-[11px] text-slate-500">
+                  Setiap check-in & check-out langsung masuk sebagai baris baru di spreadsheet
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={googleAutoSync}
+                  onChange={(e) => handleToggleAutoSync(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+              </label>
+            </div>
+
+            {/* Manual Sync Button */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1 border-t border-slate-100">
+              <span className="text-xs text-slate-500">
+                Data lokal saat ini: <strong className="text-slate-700">{attendanceRecords.length} catatan absensi</strong>
+              </span>
+
+              <button
+                onClick={() => {
+                  if (!googleUser) {
+                    setGoogleError("Silakan hubungkan akun Google terlebih dahulu.");
+                    return;
+                  }
+                  setGoogleConfirmOpen(true);
+                }}
+                disabled={isSyncingSheets || !googleUser}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-xs disabled:opacity-50 cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSheets ? "animate-spin" : ""}`} />
+                <span>{isSyncingSheets ? "Menyinkronkan..." : "Sinkronkan Seluruh Data Sekarang"}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Google Drive Archive */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 flex items-center justify-center">
+                  <HardDrive className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Google Drive: Berkas Laporan Presensi</h3>
+                  <p className="text-xs text-slate-500">Daftar arsip laporan yang tersimpan di Google Drive</p>
+                </div>
+              </div>
+
+              <a
+                href="https://drive.google.com"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold transition-colors"
+              >
+                <span>Buka Drive</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            {driveFiles.length > 0 ? (
+              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                {driveFiles.map((file) => (
+                  <div
+                    key={file.id}
+                    className="p-3 bg-slate-50 hover:bg-blue-50/60 rounded-xl border border-slate-200/70 flex items-center justify-between text-xs transition-colors"
+                  >
+                    <div className="flex items-center gap-2 min-w-0 pr-2">
+                      {file.mimeType.includes("spreadsheet") ? (
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                      ) : (
+                        <HardDrive className="w-4 h-4 text-blue-600 shrink-0" />
+                      )}
+                      <span className="font-semibold text-slate-800 truncate">{file.name}</span>
+                    </div>
+                    <a
+                      href={file.webViewLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-600 hover:text-blue-800 font-bold shrink-0 flex items-center gap-1 ml-2"
+                    >
+                      <span>Lihat</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/60 text-center text-xs text-slate-500">
+                {isLoadingDriveFiles
+                  ? "Memuat berkas dari Google Drive..."
+                  : googleUser
+                  ? "Belum ada berkas ekspor yang disimpan ke Google Drive. Gunakan tab Laporan Bulanan untuk mengekspor slip/laporan."
+                  : "Hubungkan akun Google untuk mengakses berkas arsip Anda."}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal for Google Sync in AdminSettings */}
+      <WorkspaceConfirmModal
+        isOpen={googleConfirmOpen}
+        onClose={() => setGoogleConfirmOpen(false)}
+        onConfirm={executeBulkSync}
+        title="Sinkronkan Semua Data Presensi ke Google Sheets"
+        description="Aplikasi akan memperbarui spreadsheet 'PresensiGo - Rekap Absensi Pegawai' di akun Google Anda dengan semua catatan absensi saat ini. Data yang ada akan disinkronkan rapi ke baris-baris spreadsheet."
+        itemCount={attendanceRecords.length}
+        actionType="sheets_sync"
+        confirmButtonText="Ya, Sinkronkan Sekarang"
+        isProcessing={isSyncingSheets}
+        itemDetails={[
+          `Target Spreadsheet: PresensiGo - Rekap Absensi Pegawai`,
+          `Total Catatan: ${attendanceRecords.length} baris`,
+          `Kolom: ID, Tanggal, Jam Masuk, Jam Pulang, Pegawai, Status, GPS, Verifikasi Wajah, Catatan`,
+        ]}
+      />
     </div>
   );
 };

@@ -19,17 +19,29 @@ import {
   FileText,
   Loader2,
   FileDown,
+  HardDrive,
+  ExternalLink,
+  Sparkles,
+  RefreshCw,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import { AttendanceRecord, CompanyBranding, EmployeeProfile } from "../types";
+import {
+  syncAllAttendanceRecords,
+  uploadFileToGoogleDrive,
+  getStoredSpreadsheetUrl,
+} from "../services/googleWorkspace";
+import { getAccessToken, googleSignIn } from "../services/googleAuth";
+import { WorkspaceConfirmModal } from "./WorkspaceConfirmModal";
 
 interface MonthlyReportViewProps {
   records: AttendanceRecord[];
   employees: EmployeeProfile[];
   currentEmployee: EmployeeProfile;
   branding: CompanyBranding;
+  onOpenGoogleModal?: () => void;
 }
 
 export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
@@ -47,9 +59,209 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Google Workspace States
+  const [isSyncingSheets, setIsSyncingSheets] = useState(false);
+  const [isSavingDrive, setIsSavingDrive] = useState(false);
+  const [workspaceConfirmOpen, setWorkspaceConfirmOpen] = useState(false);
+  const [confirmConfig, setConfirmConfig] = useState<{
+    actionType: "sheets_sync" | "drive_upload";
+    title: string;
+    description: string;
+    itemCount?: number;
+    details?: string[];
+    onConfirm: () => Promise<void>;
+  } | null>(null);
+
   const showNotification = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  // Helper to build Excel Workbook
+  const createExcelWorkbook = () => {
+    const worksheetData: (string | number)[][] = [
+      // Baris Header Perusahaan
+      [branding.companyName.toUpperCase()],
+      [branding.tagline || "Sistem Manajemen Presensi & Kepegawaian Digital"],
+      ["LAPORAN REKAPITULASI PRESENSI PEGAWAI"],
+      [`Periode: ${selectedMonth} | Waktu Unduh: ${new Date().toLocaleString("id-ID")}`],
+      [],
+      // Profil Karyawan
+      ["PROFIL PEGAWAI", ""],
+      ["Nama Pegawai", targetEmployee.name, "", "Departemen", targetEmployee.department],
+      ["NIP", targetEmployee.nip || "-", "", "Posisi / Jabatan", targetEmployee.position],
+      ["Kantor / Cabang", targetEmployee.assignedOffice || "Kantor Pusat", "", "Sisa Cuti", `${targetEmployee.leaveQuota?.remainingDays ?? 12} Hari`],
+      [],
+      // Ringkasan Kehadiran
+      ["RINGKASAN KEHADIRAN", ""],
+      ["Total Hari Kerja", "Tepat Waktu", "Terlambat", "Izin / Cuti", "Sakit", "Alpa", "Skor Disiplin"],
+      [
+        `${stats.totalWorkingDays} Hari`,
+        `${stats.onTimeCount} Hari`,
+        `${stats.lateCount} Hari`,
+        `${stats.leaveCount} Hari`,
+        `${stats.sickCount} Hari`,
+        `${stats.alpaCount} Hari`,
+        `${stats.attendanceScore}%`
+      ],
+      [],
+      // Detail Log Harian
+      ["RINCIAN LOG PRESENSI HARIAN", ""],
+      [
+        "No",
+        "ID Presensi",
+        "Tanggal",
+        "Hari",
+        "Jam Masuk",
+        "Jam Pulang",
+        "Status Kehadiran",
+        "Jarak GPS (Meter)",
+        "Radius Kantor",
+        "Verifikasi Wajah",
+        "Catatan Karyawan"
+      ]
+    ];
+
+    monthlyRecords.forEach((r, idx) => {
+      const d = new Date(r.date);
+      const dayName = isNaN(d.getTime()) ? "-" : d.toLocaleDateString("id-ID", { weekday: "long" });
+      const statusLabel =
+        r.status === "tepat_waktu"
+          ? "Tepat Waktu"
+          : r.status === "terlambat"
+          ? "Terlambat"
+          : r.status === "izin"
+          ? "Izin Resmi"
+          : r.status === "sakit"
+          ? "Sakit"
+          : "Alpa";
+
+      worksheetData.push([
+        idx + 1,
+        r.id,
+        r.date,
+        dayName,
+        r.checkInTime || "-",
+        r.checkOutTime || "-",
+        statusLabel,
+        r.location?.distanceMeters ?? 0,
+        r.location?.inRadius ? "Dalam Radius Area" : "Luar Radius Area",
+        r.verifiedByFace ? "Biometrik Terverifikasi" : "Manual",
+        r.notes || "-"
+      ]);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(worksheetData);
+    ws["!cols"] = [
+      { wch: 6 },
+      { wch: 18 },
+      { wch: 14 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 22 },
+      { wch: 24 },
+      { wch: 32 }
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Laporan Presensi");
+    return wb;
+  };
+
+  // Trigger Google Sheets Bulk Sync with Confirmation Dialog
+  const handlePromptGoogleSheetsSync = async () => {
+    let token = await getAccessToken();
+    if (!token) {
+      try {
+        const authRes = await googleSignIn();
+        if (!authRes) return;
+        token = authRes.accessToken;
+      } catch (e: any) {
+        showNotification("Gagal masuk dengan Google. Silakan coba lagi.");
+        return;
+      }
+    }
+
+    setConfirmConfig({
+      actionType: "sheets_sync",
+      title: "Sinkronkan Laporan ke Google Sheets",
+      description: `Aplikasi akan memperbarui spreadsheet Google Anda dengan seluruh catatan presensi (${records.length} baris). Baris spreadsheet akan diperbarui rapi dengan tanggal, jam masuk, jam pulang, dan status GPS.`,
+      itemCount: records.length,
+      details: [
+        `Target: Spreadsheet "PresensiGo - Rekap Absensi Pegawai"`,
+        `Jumlah data yang disinkronkan: ${records.length} baris presensi`,
+        `Format kolom: Waktu Masuk, Waktu Pulang, Verifikasi Wajah, dan Koordinat GPS`,
+      ],
+      onConfirm: async () => {
+        setIsSyncingSheets(true);
+        try {
+          const res = await syncAllAttendanceRecords(records);
+          setWorkspaceConfirmOpen(false);
+          showNotification(`Berhasil! ${res.count} data absensi disinkronkan ke Google Sheets.`);
+        } catch (err: any) {
+          showNotification(err?.message || "Gagal sinkron ke Google Sheets.");
+        } finally {
+          setIsSyncingSheets(false);
+        }
+      },
+    });
+    setWorkspaceConfirmOpen(true);
+  };
+
+  // Trigger Google Drive Report Upload with Confirmation Dialog
+  const handlePromptGoogleDriveExport = async () => {
+    let token = await getAccessToken();
+    if (!token) {
+      try {
+        const authRes = await googleSignIn();
+        if (!authRes) return;
+        token = authRes.accessToken;
+      } catch (e: any) {
+        showNotification("Gagal masuk dengan Google. Silakan coba lagi.");
+        return;
+      }
+    }
+
+    const cleanComp = branding.companyName.replace(/[^a-zA-Z0-9]/g, "_");
+    const cleanEmp = targetEmployee.name.replace(/[^a-zA-Z0-9]/g, "_");
+    const fileName = `Laporan_Presensi_${cleanComp}_${cleanEmp}_${selectedMonth}.xlsx`;
+
+    setConfirmConfig({
+      actionType: "drive_upload",
+      title: "Simpan Laporan ke Google Drive",
+      description: `Berkas laporan presensi "${fileName}" akan diunggah dan diarsipkan langsung ke akun Google Drive Anda.`,
+      itemCount: monthlyRecords.length,
+      details: [
+        `Nama berkas: ${fileName}`,
+        `Tipe berkas: Microsoft Excel (.xlsx)`,
+        `Data: ${monthlyRecords.length} catatan presensi bulan ${selectedMonth}`,
+      ],
+      onConfirm: async () => {
+        setIsSavingDrive(true);
+        try {
+          const wb = createExcelWorkbook();
+          const excelBuffer = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+          const blob = new Blob([excelBuffer], {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          });
+          const result = await uploadFileToGoogleDrive(
+            fileName,
+            blob,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          );
+          setWorkspaceConfirmOpen(false);
+          showNotification(`Berkas berhasil disimpan di Google Drive!`);
+        } catch (err: any) {
+          showNotification(err?.message || "Gagal menyimpan berkas ke Google Drive.");
+        } finally {
+          setIsSavingDrive(false);
+        }
+      },
+    });
+    setWorkspaceConfirmOpen(true);
   };
 
   // Month options
@@ -108,98 +320,7 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
   const handleExportExcel = () => {
     try {
       setIsExportingExcel(true);
-
-      const worksheetData: (string | number)[][] = [
-        // Baris Header Perusahaan
-        [branding.companyName.toUpperCase()],
-        [branding.tagline || "Sistem Manajemen Presensi & Kepegawaian Digital"],
-        ["LAPORAN REKAPITULASI PRESENSI PEGAWAI"],
-        [`Periode: ${selectedMonth} | Waktu Unduh: ${new Date().toLocaleString("id-ID")}`],
-        [],
-        // Profil Karyawan
-        ["PROFIL PEGAWAI", ""],
-        ["Nama Pegawai", targetEmployee.name, "", "Departemen", targetEmployee.department],
-        ["NIP", targetEmployee.nip || "-", "", "Posisi / Jabatan", targetEmployee.position],
-        ["Kantor / Cabang", targetEmployee.assignedOffice || "Kantor Pusat", "", "Sisa Cuti", `${targetEmployee.leaveQuota?.remainingDays ?? 12} Hari`],
-        [],
-        // Ringkasan Kehadiran
-        ["RINGKASAN KEHADIRAN", ""],
-        ["Total Hari Kerja", "Tepat Waktu", "Terlambat", "Izin / Cuti", "Sakit", "Alpa", "Skor Disiplin"],
-        [
-          `${stats.totalWorkingDays} Hari`,
-          `${stats.onTimeCount} Hari`,
-          `${stats.lateCount} Hari`,
-          `${stats.leaveCount} Hari`,
-          `${stats.sickCount} Hari`,
-          `${stats.alpaCount} Hari`,
-          `${stats.attendanceScore}%`
-        ],
-        [],
-        // Detail Log Harian
-        ["RINCIAN LOG PRESENSI HARIAN", ""],
-        [
-          "No",
-          "ID Presensi",
-          "Tanggal",
-          "Hari",
-          "Jam Masuk",
-          "Jam Pulang",
-          "Status Kehadiran",
-          "Jarak GPS (Meter)",
-          "Radius Kantor",
-          "Verifikasi Wajah",
-          "Catatan Karyawan"
-        ]
-      ];
-
-      monthlyRecords.forEach((r, idx) => {
-        const d = new Date(r.date);
-        const dayName = isNaN(d.getTime()) ? "-" : d.toLocaleDateString("id-ID", { weekday: "long" });
-        const statusLabel =
-          r.status === "tepat_waktu"
-            ? "Tepat Waktu"
-            : r.status === "terlambat"
-            ? "Terlambat"
-            : r.status === "izin"
-            ? "Izin Resmi"
-            : r.status === "sakit"
-            ? "Sakit"
-            : "Alpa";
-
-        worksheetData.push([
-          idx + 1,
-          r.id,
-          r.date,
-          dayName,
-          r.checkInTime || "-",
-          r.checkOutTime || "-",
-          statusLabel,
-          r.location?.distanceMeters ?? 0,
-          r.location?.inRadius ? "Dalam Radius Area" : "Luar Radius Area",
-          r.verifiedByFace ? "Biometrik Terverifikasi" : "Manual",
-          r.notes || "-"
-        ]);
-      });
-
-      const ws = XLSX.utils.aoa_to_sheet(worksheetData);
-
-      // Lebar kolom rapi untuk Microsoft Excel & Google Sheets
-      ws["!cols"] = [
-        { wch: 6 },  // No
-        { wch: 18 }, // ID Presensi
-        { wch: 14 }, // Tanggal
-        { wch: 12 }, // Hari
-        { wch: 12 }, // Jam Masuk
-        { wch: 12 }, // Jam Pulang
-        { wch: 18 }, // Status Kehadiran
-        { wch: 18 }, // Jarak GPS (Meter)
-        { wch: 22 }, // Radius Kantor
-        { wch: 24 }, // Verifikasi Wajah
-        { wch: 32 }  // Catatan Karyawan
-      ];
-
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Laporan Presensi");
+      const wb = createExcelWorkbook();
 
       const cleanComp = branding.companyName.replace(/[^a-zA-Z0-9]/g, "_");
       const cleanEmp = targetEmployee.name.replace(/[^a-zA-Z0-9]/g, "_");
@@ -291,7 +412,7 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
             id="btn-ekspor-excel"
             onClick={handleExportExcel}
             disabled={isExportingExcel}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-bold active:scale-95 transition-all shadow-2xs disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-bold active:scale-95 transition-all shadow-2xs disabled:opacity-50 cursor-pointer"
             title="Download Laporan Format Excel (.xlsx)"
           >
             {isExportingExcel ? (
@@ -306,12 +427,59 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
           <button
             id="btn-ekspor-pdf"
             onClick={() => setShowPrintSlip(true)}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold active:scale-95 transition-all shadow-xs"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold active:scale-95 transition-all shadow-xs cursor-pointer"
             title="Buka & Ekspor Slip Kehadiran ke PDF"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Ekspor PDF</span>
           </button>
+
+          {/* Tombol Simpan ke Google Drive */}
+          <button
+            id="btn-save-drive"
+            onClick={handlePromptGoogleDriveExport}
+            disabled={isSavingDrive}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 text-xs font-bold active:scale-95 transition-all shadow-2xs disabled:opacity-50 cursor-pointer"
+            title="Simpan Laporan Bulanan ke Google Drive"
+          >
+            {isSavingDrive ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+            ) : (
+              <HardDrive className="w-3.5 h-3.5 text-blue-600" />
+            )}
+            <span>Simpan ke Drive</span>
+          </button>
+
+          {/* Tombol Sinkron ke Google Sheet */}
+          <button
+            id="btn-sync-sheets"
+            onClick={handlePromptGoogleSheetsSync}
+            disabled={isSyncingSheets}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-800 text-xs font-bold active:scale-95 transition-all shadow-2xs disabled:opacity-50 cursor-pointer"
+            title="Sinkronkan Semua Data Absensi ke Google Sheets"
+          >
+            {isSyncingSheets ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-600" />
+            ) : (
+              <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+            )}
+            <span>Sinkron Sheet</span>
+          </button>
+
+          {/* Link Buka Spreadsheet jika sudah ada */}
+          {getStoredSpreadsheetUrl() && (
+            <a
+              href={getStoredSpreadsheetUrl()!}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-800 text-xs font-semibold border border-emerald-300/60 transition-colors"
+              title="Buka Spreadsheet di Tab Baru"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Buka Sheet</span>
+              <ExternalLink className="w-3 h-3 text-emerald-600" />
+            </a>
+          )}
         </div>
       </div>
 
@@ -715,6 +883,19 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
         </div>
       )}
 
+      {/* Confirmation Modal for Google Workspace Operations */}
+      <WorkspaceConfirmModal
+        isOpen={workspaceConfirmOpen}
+        onClose={() => setWorkspaceConfirmOpen(false)}
+        onConfirm={confirmConfig?.onConfirm || (() => {})}
+        title={confirmConfig?.title || "Konfirmasi Google Workspace"}
+        description={confirmConfig?.description || ""}
+        itemCount={confirmConfig?.itemCount}
+        itemDetails={confirmConfig?.details}
+        actionType={confirmConfig?.actionType || "sheets_sync"}
+        isProcessing={isSyncingSheets || isSavingDrive}
+        confirmButtonText={confirmConfig?.actionType === "drive_upload" ? "Ya, Simpan ke Drive" : "Ya, Sinkronkan"}
+      />
     </div>
   );
 };

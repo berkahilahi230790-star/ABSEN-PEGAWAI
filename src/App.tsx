@@ -47,6 +47,15 @@ import { EmployeeAccountModal } from "./components/EmployeeAccountModal";
 import { EmployeeIdentityModal } from "./components/EmployeeIdentityModal";
 import { ChangePasswordModal } from "./components/ChangePasswordModal";
 import { UploadPhotoModal } from "./components/UploadPhotoModal";
+import { GoogleWorkspaceModal } from "./components/GoogleWorkspaceModal";
+import {
+  initAuth,
+  getAccessToken,
+} from "./services/googleAuth";
+import {
+  appendAttendanceToSheet,
+  getGoogleAutoSyncEnabled,
+} from "./services/googleWorkspace";
 
 import {
   Clock,
@@ -71,6 +80,7 @@ import {
   BellRing,
   Bell,
   FileText,
+  HardDrive,
 } from "lucide-react";
 
 export default function App() {
@@ -86,7 +96,7 @@ export default function App() {
 
   // Active Main Navigation Tab
   const [currentView, setCurrentView] = useState<"home" | "report" | "manager" | "settings">("home");
-  const [adminSettingsSubTab, setAdminSettingsSubTab] = useState<"schedule" | "gps" | "leave" | "branding">("schedule");
+  const [adminSettingsSubTab, setAdminSettingsSubTab] = useState<"schedule" | "gps" | "leave" | "branding" | "google">("schedule");
 
   const handleOpenBranding = () => {
     setAdminSettingsSubTab("branding");
@@ -101,6 +111,22 @@ export default function App() {
   const [radarModalOpen, setRadarModalOpen] = useState(false);
   const [roleModalOpen, setRoleModalOpen] = useState(false);
   const [showMobileNotifications, setShowMobileNotifications] = useState(false);
+  const [googleModalOpen, setGoogleModalOpen] = useState(false);
+  const [isGoogleConnected, setIsGoogleConnected] = useState(false);
+
+  // Listen to Google auth state
+  useEffect(() => {
+    const unsubscribe = initAuth(
+      (_user, token) => {
+        setIsGoogleConnected(Boolean(token));
+      },
+      () => {
+        setIsGoogleConnected(false);
+      }
+    );
+    getAccessToken().then((t) => setIsGoogleConnected(Boolean(t)));
+    return () => unsubscribe();
+  }, []);
 
   // Modals for Employee Identity, Password, and Photo / Account
   const [accountModalOpen, setAccountModalOpen] = useState(false);
@@ -242,6 +268,22 @@ export default function App() {
 
     setAttendanceRecords(updatedList);
     saveAttendanceRecord(record);
+
+    // Auto-sync ke Google Sheets jika akun Google terhubung dan autoSync aktif
+    getAccessToken().then((token) => {
+      if (token && getGoogleAutoSyncEnabled()) {
+        appendAttendanceToSheet(record)
+          .then(() => {
+            handleTriggerVoiceToast(
+              "Tersinkron ke Google Sheets",
+              `Presensi ${record.employeeName} otomatis dicatat di Google Spreadsheet.`
+            );
+          })
+          .catch((err) => {
+            console.warn("Auto-sync to Google Sheets failed:", err);
+          });
+      }
+    });
   };
 
   const handleSubmitLeaveRequest = (request: LeaveRequest) => {
@@ -447,6 +489,26 @@ export default function App() {
                 </div>
               )}
             </div>
+
+            {/* Tombol Google Sheets & Drive Sync */}
+            <button
+              id="header-google-sync-btn"
+              onClick={() => setGoogleModalOpen(true)}
+              className={`px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 border transition-all cursor-pointer ${
+                isGoogleConnected
+                  ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
+                  : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+              }`}
+              title={isGoogleConnected ? "Google Sheets & Drive Terhubung (Klik untuk sinkron / kelola)" : "Hubungkan Google Sheets & Drive"}
+            >
+              <FileSpreadsheet className={`w-3.5 h-3.5 ${isGoogleConnected ? "text-emerald-600" : "text-slate-500"}`} />
+              <span className="hidden xs:inline text-[11px]">
+                {isGoogleConnected ? "Sheets" : "G-Sheets"}
+              </span>
+              {isGoogleConnected && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+              )}
+            </button>
 
             {/* Tombol Role Badge */}
             <button
@@ -699,6 +761,7 @@ export default function App() {
                 employees={employees}
                 currentEmployee={currentEmployee}
                 branding={branding}
+                onOpenGoogleModal={() => setGoogleModalOpen(true)}
               />
             )}
 
@@ -727,6 +790,7 @@ export default function App() {
                 onSaveBranding={handleSaveBranding}
                 employees={employees}
                 onUpdateEmployeeQuota={handleUpdateEmployeeQuota}
+                attendanceRecords={attendanceRecords}
               />
             )}
       </main>
@@ -942,6 +1006,15 @@ export default function App() {
         onClose={() => setUploadPhotoModalOpen(false)}
         employee={currentEmployee}
         onSavePhoto={handleSaveEmployeePhoto}
+      />
+
+      {/* 10. Google Workspace Modal (Google Sheets & Google Drive Integration) */}
+      <GoogleWorkspaceModal
+        isOpen={googleModalOpen}
+        onClose={() => setGoogleModalOpen(false)}
+        attendanceRecords={attendanceRecords}
+        branding={branding}
+        onShowToast={(msg) => handleTriggerVoiceToast("Google Workspace", msg)}
       />
     </div>
   );
