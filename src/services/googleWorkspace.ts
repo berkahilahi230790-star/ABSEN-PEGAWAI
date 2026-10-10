@@ -4,6 +4,10 @@ import { getAccessToken } from "./googleAuth";
 const STORAGE_SHEET_ID_KEY = "presensigo_google_spreadsheet_id";
 const STORAGE_SHEET_URL_KEY = "presensigo_google_spreadsheet_url";
 const STORAGE_AUTO_SYNC_KEY = "presensigo_google_auto_sync";
+const STORAGE_DRIVE_FOLDER_ID_KEY = "presensigo_google_drive_folder_id";
+const STORAGE_DRIVE_FOLDER_URL_KEY = "presensigo_google_drive_folder_url";
+const STORAGE_DRIVE_PHOTO_FOLDER_ID_KEY = "presensigo_google_drive_photo_folder_id";
+const STORAGE_DRIVE_PHOTO_FOLDER_URL_KEY = "presensigo_google_drive_photo_folder_url";
 
 export interface GoogleSpreadsheetInfo {
   spreadsheetId: string;
@@ -19,6 +23,85 @@ export interface DriveFileInfo {
   webViewLink: string;
   createdTime: string;
   size?: string;
+}
+
+export function extractDriveFolderId(input: string): string | null {
+  if (!input) return null;
+  const trimmed = input.trim();
+  const match = trimmed.match(/folders\/([a-zA-Z0-9_-]+)/);
+  if (match) return match[1];
+  if (/^[a-zA-Z0-9_-]{15,}$/.test(trimmed)) return trimmed;
+  return null;
+}
+
+export function getStoredDriveFolderId(): string | null {
+  try {
+    return localStorage.getItem(STORAGE_DRIVE_FOLDER_ID_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function getStoredDriveFolderUrl(): string | null {
+  try {
+    return localStorage.getItem(STORAGE_DRIVE_FOLDER_URL_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredDriveFolder(urlOrId: string): void {
+  try {
+    const trimmed = urlOrId.trim();
+    if (!trimmed) {
+      localStorage.removeItem(STORAGE_DRIVE_FOLDER_ID_KEY);
+      localStorage.removeItem(STORAGE_DRIVE_FOLDER_URL_KEY);
+      return;
+    }
+    const folderId = extractDriveFolderId(trimmed);
+    if (folderId) {
+      localStorage.setItem(STORAGE_DRIVE_FOLDER_ID_KEY, folderId);
+      const url = trimmed.startsWith("http")
+        ? trimmed
+        : `https://drive.google.com/drive/folders/${folderId}`;
+      localStorage.setItem(STORAGE_DRIVE_FOLDER_URL_KEY, url);
+    }
+  } catch {}
+}
+
+export function getStoredPhotoDriveFolderId(): string | null {
+  try {
+    return localStorage.getItem(STORAGE_DRIVE_PHOTO_FOLDER_ID_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function getStoredPhotoDriveFolderUrl(): string | null {
+  try {
+    return localStorage.getItem(STORAGE_DRIVE_PHOTO_FOLDER_URL_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredPhotoDriveFolder(urlOrId: string): void {
+  try {
+    const trimmed = urlOrId.trim();
+    if (!trimmed) {
+      localStorage.removeItem(STORAGE_DRIVE_PHOTO_FOLDER_ID_KEY);
+      localStorage.removeItem(STORAGE_DRIVE_PHOTO_FOLDER_URL_KEY);
+      return;
+    }
+    const folderId = extractDriveFolderId(trimmed);
+    if (folderId) {
+      localStorage.setItem(STORAGE_DRIVE_PHOTO_FOLDER_ID_KEY, folderId);
+      const url = trimmed.startsWith("http")
+        ? trimmed
+        : `https://drive.google.com/drive/folders/${folderId}`;
+      localStorage.setItem(STORAGE_DRIVE_PHOTO_FOLDER_URL_KEY, url);
+    }
+  } catch {}
 }
 
 export function getStoredSpreadsheetId(): string | null {
@@ -401,30 +484,45 @@ export async function uploadFileToGoogleDrive(
     throw new Error("Token Google tidak aktif. Harap hubungkan akun Google terlebih dahulu.");
   }
 
-  // Metadata for Drive upload
-  const metadata = {
-    name: filename,
-    description: "Laporan presensi pegawai PresensiGo HR",
-    mimeType,
+  const folderId = getStoredDriveFolderId();
+
+  // Helper to execute multipart upload
+  const doUpload = async (useFolder: boolean) => {
+    const metadata: any = {
+      name: filename,
+      description: "Laporan presensi pegawai PresensiGo HR",
+      mimeType,
+    };
+    if (useFolder && folderId) {
+      metadata.parents = [folderId];
+    }
+
+    const form = new FormData();
+    form.append(
+      "metadata",
+      new Blob([JSON.stringify(metadata)], { type: "application/json; charset=UTF-8" })
+    );
+    form.append("file", fileContent, filename);
+
+    return fetch(
+      "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: form,
+      }
+    );
   };
 
-  const form = new FormData();
-  form.append(
-    "metadata",
-    new Blob([JSON.stringify(metadata)], { type: "application/json; charset=UTF-8" })
-  );
-  form.append("file", fileContent, filename);
+  let res = await doUpload(Boolean(folderId));
 
-  const res = await fetch(
-    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      body: form,
-    }
-  );
+  // If specific folder failed (e.g. 404 or folder not found), fallback to root Drive
+  if (!res.ok && folderId) {
+    console.warn("Upload to specific Google Drive folder failed, retrying to root Drive...");
+    res = await doUpload(false);
+  }
 
   if (!res.ok) {
     const errText = await res.text();
@@ -436,6 +534,95 @@ export async function uploadFileToGoogleDrive(
   const webViewLink = result.webViewLink || `https://drive.google.com/file/d/${fileId}/view`;
 
   return { fileId, webViewLink };
+}
+
+/**
+ * Upload an employee attendance verification photo to Google Drive
+ * Saves storage in Firestore by only storing the Drive URL in the database
+ */
+export async function uploadAttendancePhotoToGoogleDrive(
+  dataUrlOrBase64: string,
+  employeeName: string,
+  date: string,
+  time: string
+): Promise<{ fileId: string; webViewLink: string } | null> {
+  const token = await getAccessToken();
+  if (!token) {
+    console.warn("Google token not available for photo upload");
+    return null;
+  }
+
+  try {
+    let blob: Blob;
+    if (dataUrlOrBase64.startsWith("data:")) {
+      const parts = dataUrlOrBase64.split(";base64,");
+      const mime = parts[0].split(":")[1] || "image/jpeg";
+      const binary = atob(parts[1]);
+      const array = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        array[i] = binary.charCodeAt(i);
+      }
+      blob = new Blob([array], { type: mime });
+    } else {
+      return null;
+    }
+
+    const cleanEmpName = employeeName.replace(/[^a-zA-Z0-9]/g, "_");
+    const cleanTime = (time || "08-00-00").replace(/:/g, "-");
+    const filename = `PresensiGo_Foto_${cleanEmpName}_${date}_${cleanTime}.jpg`;
+
+    const folderId = getStoredPhotoDriveFolderId() || getStoredDriveFolderId();
+
+    const doUpload = async (useFolder: boolean) => {
+      const metadata: any = {
+        name: filename,
+        description: `Foto presensi wajah ${employeeName} pada tanggal ${date} (${time}) - PresensiGo HR`,
+        mimeType: "image/jpeg",
+      };
+      if (useFolder && folderId) {
+        metadata.parents = [folderId];
+      }
+
+      const form = new FormData();
+      form.append(
+        "metadata",
+        new Blob([JSON.stringify(metadata)], { type: "application/json; charset=UTF-8" })
+      );
+      form.append("file", blob, filename);
+
+      return fetch(
+        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: form,
+        }
+      );
+    };
+
+    let res = await doUpload(Boolean(folderId));
+    if (!res.ok && folderId) {
+      console.warn("Photo upload to specific folder failed, retrying to root Drive...");
+      res = await doUpload(false);
+    }
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn("Google Drive photo upload failed:", errText);
+      return null;
+    }
+
+    const json = await res.json();
+    return {
+      fileId: json.id,
+      webViewLink: json.webViewLink || `https://drive.google.com/file/d/${json.id}/view`,
+    };
+  } catch (err) {
+    console.warn("Exception during photo upload to Google Drive:", err);
+    return null;
+  }
 }
 
 /**

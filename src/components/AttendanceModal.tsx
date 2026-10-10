@@ -8,10 +8,11 @@ import {
   X,
   Scan,
   ShieldCheck,
+  ShieldAlert,
   Sparkles,
-  Info,
-  Layers,
-  Map,
+  Lock,
+  FileText,
+  Navigation,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import {
@@ -20,10 +21,12 @@ import {
   CompanyBranding,
   Coordinates,
   EmployeeProfile,
+  WorkLocation,
   WorkScheduleConfig,
 } from "../types";
 import { calculateDistanceMeters } from "../services/storage";
 import { audioNotificationService } from "../services/audioNotification";
+import { uploadAttendancePhotoToGoogleDrive } from "../services/googleWorkspace";
 
 interface AttendanceModalProps {
   isOpen: boolean;
@@ -32,7 +35,9 @@ interface AttendanceModalProps {
   employee: EmployeeProfile;
   schedule: WorkScheduleConfig;
   branding: CompanyBranding;
+  workLocations?: WorkLocation[];
   onSaveAttendance: (record: AttendanceRecord) => void;
+  onOpenLeaveRequest?: () => void;
 }
 
 export const AttendanceModal: React.FC<AttendanceModalProps> = ({
@@ -42,10 +47,22 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
   employee,
   schedule,
   branding,
+  workLocations,
   onSaveAttendance,
+  onOpenLeaveRequest,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Resolve assigned work location coordinates & radius
+  const assignedLocation = workLocations?.find(
+    (loc) => loc.id === employee.workLocationId || loc.name === employee.workLocationName
+  );
+  const targetOfficeName = assignedLocation ? assignedLocation.name : schedule.officeName;
+  const targetCoordinates: Coordinates = assignedLocation
+    ? { latitude: assignedLocation.latitude, longitude: assignedLocation.longitude }
+    : schedule.officeCoordinates;
+  const targetRadius = assignedLocation?.radiusMeters || schedule.geofenceRadiusMeters || 100;
 
   // States
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -59,14 +76,17 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
   const [livenessPassed, setLivenessPassed] = useState(false);
   const [scanningActive, setScanningActive] = useState(true);
 
-  // GPS States
+  // GPS States - strictly initialized to false (not verified)
   const [gpsLoading, setGpsLoading] = useState(true);
   const [userCoords, setUserCoords] = useState<Coordinates | null>(null);
   const [distanceMeters, setDistanceMeters] = useState<number | null>(null);
-  const [inRadius, setInRadius] = useState<boolean>(true);
+  const [inRadius, setInRadius] = useState<boolean>(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
+  const [isSimulated, setIsSimulated] = useState<boolean>(false);
+
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submittingStatus, setSubmittingStatus] = useState<string>("");
 
   // Start Camera
   const startCamera = async () => {
@@ -98,7 +118,6 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
         "Kamera tidak dapat diakses langsung. Anda dapat menggunakan mode simulasi verifikasi wajah AI."
       );
       setCameraLoading(false);
-      // Fallback simulation photo
       simulateFaceDetection();
     }
   };
@@ -115,11 +134,14 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
   const captureLocation = () => {
     setGpsLoading(true);
     setGpsError(null);
+    setIsSimulated(false);
 
     if (!("geolocation" in navigator)) {
       setGpsError("Perangkat tidak mendukung geolokasi GPS.");
-      // Fallback to near-office coordinates
-      fallbackOfficeLocation();
+      setUserCoords(null);
+      setDistanceMeters(null);
+      setInRadius(false);
+      setGpsLoading(false);
       return;
     }
 
@@ -135,40 +157,73 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
         const dist = calculateDistanceMeters(
           coords.latitude,
           coords.longitude,
-          schedule.officeCoordinates.latitude,
-          schedule.officeCoordinates.longitude
+          targetCoordinates.latitude,
+          targetCoordinates.longitude
         );
 
         setDistanceMeters(dist);
-        setInRadius(dist <= schedule.geofenceRadiusMeters);
+        const withinRadius = dist <= targetRadius;
+        setInRadius(withinRadius);
         setGpsLoading(false);
       },
       (error) => {
         console.warn("GPS Geolocation error:", error.message);
-        fallbackOfficeLocation();
+        let errorMsg = "Gagal mendeteksi koordinat GPS.";
+        if (error.code === error.PERMISSION_DENIED) {
+          errorMsg = "Izin akses lokasi GPS ditolak oleh browser/perangkat Anda. Aktifkan GPS untuk melakukan presensi.";
+        } else if (error.code === error.POSITION_UNAVAILABLE) {
+          errorMsg = "Sinyal GPS tidak tersedia atau tidak terdeteksi.";
+        } else if (error.code === error.TIMEOUT) {
+          errorMsg = "Waktu pencarian sinyal GPS habis. Silakan klik Segarkan GPS.";
+        }
+        setGpsError(errorMsg);
+        setUserCoords(null);
+        setDistanceMeters(null);
+        setInRadius(false);
+        setGpsLoading(false);
       },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   };
 
-  const fallbackOfficeLocation = () => {
-    // Generate simulated coordinates within office vicinity for testing
-    const jitterLat = (Math.random() - 0.5) * 0.0004;
-    const jitterLng = (Math.random() - 0.5) * 0.0004;
+  // Simulation helpers for testing / verification
+  const handleSimulateInside = () => {
+    setIsSimulated(true);
+    setGpsError(null);
     const mockCoords: Coordinates = {
-      latitude: schedule.officeCoordinates.latitude + jitterLat,
-      longitude: schedule.officeCoordinates.longitude + jitterLng,
-      accuracy: 12,
+      latitude: targetCoordinates.latitude + 0.00008,
+      longitude: targetCoordinates.longitude + 0.00006,
+      accuracy: 6,
     };
     setUserCoords(mockCoords);
     const dist = calculateDistanceMeters(
       mockCoords.latitude,
       mockCoords.longitude,
-      schedule.officeCoordinates.latitude,
-      schedule.officeCoordinates.longitude
+      targetCoordinates.latitude,
+      targetCoordinates.longitude
     );
     setDistanceMeters(dist);
-    setInRadius(dist <= schedule.geofenceRadiusMeters);
+    setInRadius(dist <= targetRadius);
+    setGpsLoading(false);
+  };
+
+  const handleSimulateOutside = () => {
+    setIsSimulated(true);
+    setGpsError(null);
+    const mockCoords: Coordinates = {
+      latitude: targetCoordinates.latitude + 0.02,
+      longitude: targetCoordinates.longitude + 0.02,
+      accuracy: 15,
+    };
+    setUserCoords(mockCoords);
+    const dist = calculateDistanceMeters(
+      mockCoords.latitude,
+      mockCoords.longitude,
+      targetCoordinates.latitude,
+      targetCoordinates.longitude
+    );
+    setDistanceMeters(dist);
+    setInRadius(false); // Strictly outside
     setGpsLoading(false);
   };
 
@@ -188,6 +243,9 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
       setCapturedPhoto(null);
       setFaceDetected(false);
       setLivenessPassed(false);
+      setInRadius(false);
+      setDistanceMeters(null);
+      setUserCoords(null);
       setNotes("");
       startCamera();
       captureLocation();
@@ -220,7 +278,6 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
         audioNotificationService.playChime("success");
       }
     } else {
-      // Fallback captured photo
       setCapturedPhoto(employee.avatarUrl);
       setScanningActive(false);
       audioNotificationService.playChime("success");
@@ -234,8 +291,22 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
   };
 
   // Submit Attendance Record
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    // 🚨 TOTAL BLOCKING GUARD: Completely refuse submission if outside GPS radius or GPS unresolved
+    if (!inRadius || gpsLoading || !userCoords) {
+      audioNotificationService.playChime("warning");
+      audioNotificationService.speakIndonesian(
+        "Presensi ditolak total! Anda berada di luar radius kantor yang sah."
+      );
+      return;
+    }
+
+    if (!capturedPhoto) {
+      return;
+    }
+
     setIsSubmitting(true);
+    setSubmittingStatus("Menyiapkan data presensi...");
 
     const now = new Date();
     const timeStr = now.toLocaleTimeString("id-ID", {
@@ -256,6 +327,24 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
       }
     }
 
+    // Upload photo to Google Drive if photo is captured base64 image
+    let drivePhotoResult: { fileId: string; webViewLink: string } | null = null;
+    if (capturedPhoto && capturedPhoto.startsWith("data:image")) {
+      setSubmittingStatus("Mengunggah foto presensi ke Google Drive...");
+      try {
+        drivePhotoResult = await uploadAttendancePhotoToGoogleDrive(
+          capturedPhoto,
+          employee.name,
+          dateStr,
+          timeStr
+        );
+      } catch (uploadErr) {
+        console.warn("Drive upload skipped or failed:", uploadErr);
+      }
+    }
+
+    setSubmittingStatus("Menyimpan data ke database Firestore...");
+
     const record: AttendanceRecord = {
       id: `att-${Date.now()}`,
       employeeId: employee.id,
@@ -270,12 +359,14 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
         ? {
             latitude: userCoords.latitude,
             longitude: userCoords.longitude,
-            address: schedule.officeName,
+            address: targetOfficeName,
             distanceMeters: distanceMeters || 15,
-            inRadius,
+            inRadius: true,
           }
         : undefined,
       facePhotoUrl: capturedPhoto || employee.avatarUrl,
+      facePhotoDriveUrl: drivePhotoResult?.webViewLink,
+      facePhotoDriveFileId: drivePhotoResult?.fileId,
       verifiedByFace: true,
       notes: notes.trim() || undefined,
     };
@@ -303,8 +394,9 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
     setTimeout(() => {
       onSaveAttendance(record);
       setIsSubmitting(false);
+      setSubmittingStatus("");
       onClose();
-    }, 800);
+    }, 600);
   };
 
   if (!isOpen) return null;
@@ -323,7 +415,7 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
                 {type === "in" ? "Presensi Absen Masuk" : "Presensi Absen Pulang"}
               </h2>
               <p className="text-[11px] text-blue-100 font-medium">
-                Verifikasi Wajah Biometrik & Radius GPS
+                Wajib Berada di Radius Kantor & Verifikasi Wajah
               </p>
             </div>
           </div>
@@ -445,12 +537,13 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 font-bold text-slate-900">
                 <MapPin className="w-4 h-4 text-blue-600" />
-                <span>Validasi Lokasi Kantor (GPS)</span>
+                <span>Validasi Lokasi GPS Kantor</span>
               </div>
               <button
                 onClick={captureLocation}
                 disabled={gpsLoading}
-                className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1"
+                className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 active:scale-95 transition-all"
+                title="Pindai ulang koordinat GPS perangkat"
               >
                 <RefreshCw className={`w-3 h-3 ${gpsLoading ? "animate-spin" : ""}`} />
                 <span>Segarkan GPS</span>
@@ -459,47 +552,138 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
 
             <div className="bg-white p-2.5 rounded-xl border border-slate-200 text-[11px] space-y-1.5">
               <div className="flex items-start justify-between gap-1">
-                <span className="text-slate-500">Kantor Tujuan:</span>
-                <span className="font-semibold text-slate-900 text-right">{schedule.officeName}</span>
+                <span className="text-slate-500">Titik Kantor:</span>
+                <span className="font-semibold text-slate-900 text-right">{targetOfficeName}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Batas Radius:</span>
-                <span className="font-medium text-slate-700">{schedule.geofenceRadiusMeters} meter</span>
+                <span className="text-slate-500">Radius Maksimal Sah:</span>
+                <span className="font-bold text-slate-800">{targetRadius} meter</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Jarak Terkini:</span>
-                <span className="font-bold text-slate-900">
-                  {distanceMeters !== null ? `${distanceMeters} meter` : "Menghitung..."}
+                <span className="text-slate-500">Jarak Anda Saat Ini:</span>
+                <span className={`font-black ${
+                  gpsLoading
+                    ? "text-slate-400"
+                    : inRadius
+                    ? "text-emerald-700"
+                    : "text-rose-600"
+                }`}>
+                  {gpsLoading
+                    ? "Mencari sinyal GPS..."
+                    : distanceMeters !== null
+                    ? `${distanceMeters} meter`
+                    : "Tidak terdeteksi"}
                 </span>
               </div>
 
               {/* Status Radius Pill */}
-              <div className="pt-1 border-t border-slate-100 flex items-center justify-between">
+              <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between">
                 <span className="text-slate-500">Status Geolokasi:</span>
-                {inRadius ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold text-[10px]">
+                {gpsLoading ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 font-bold text-[10px]">
+                    <RefreshCw className="w-3 h-3 animate-spin text-blue-600" />
+                    Memverifikasi Lokasi...
+                  </span>
+                ) : inRadius ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold text-[10px] shadow-xs">
                     <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                    Dalam Radius Kantor (Sah)
+                    Dalam Radius ({distanceMeters}m ≤ {targetRadius}m) - Sah
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 font-bold text-[10px]">
-                    <AlertTriangle className="w-3 h-3 text-amber-600" />
-                    Di Luar Radius Kantor
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-rose-100 text-rose-800 font-black text-[10px] shadow-xs">
+                    <ShieldAlert className="w-3 h-3 text-rose-600" />
+                    DI LUAR RADIUS (DIBLOKIR)
                   </span>
                 )}
               </div>
             </div>
 
-            {!inRadius && (
-              <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-[10px] text-amber-800 flex items-start gap-1.5">
-                <Info className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-                <span>
-                  Anda terdeteksi di luar radius kantor ({distanceMeters}m &gt;{" "}
-                  {schedule.geofenceRadiusMeters}m). Wajib tuliskan alasan di catatan (misal: WFH atau
-                  Dinas Lapangan).
-                </span>
+            {/* 🚨 STRICT TOTAL BLOCKING BANNER WHEN OUTSIDE RADIUS */}
+            {!inRadius && !gpsLoading && (
+              <div className="p-3.5 rounded-2xl bg-rose-50 border-2 border-rose-300 text-rose-900 space-y-2.5 animate-in fade-in">
+                <div className="flex items-start gap-2.5">
+                  <div className="w-7 h-7 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+                    <ShieldAlert className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="px-2 py-0.5 bg-rose-600 text-white text-[9px] font-black uppercase rounded-md tracking-wider">
+                        BLOKIR TOTAL
+                      </span>
+                      <h4 className="text-xs font-black text-rose-900">
+                        Presensi {type === "in" ? "Masuk" : "Pulang"} Tidak Dapat Terkirim
+                      </h4>
+                    </div>
+                    <p className="text-[11px] text-rose-800 mt-1 leading-relaxed">
+                      {distanceMeters !== null
+                        ? `Posisi GPS Anda berjarak ${distanceMeters} meter dari kantor (Batas maksimum yang diperbolehkan adalah ${targetRadius} meter).`
+                        : gpsError || "Koordinat GPS perangkat Anda tidak terdeteksi di lokasi kantor."}
+                      {" "}Sistem memblokir pengiriman presensi secara total hingga Anda berada langsung di lokasi kantor.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-rose-200 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[10px] text-rose-700 font-medium">
+                    Sedang dinas luar, sakit, atau berhalangan ke kantor?
+                  </span>
+                  {onOpenLeaveRequest && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenLeaveRequest();
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-[11px] flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>Ajukan Izin / Cuti (Bebas Radius GPS)</span>
+                    </button>
+                  )}
+                </div>
               </div>
             )}
+
+            {/* Testing / Simulation Toolbar (for verifying behavior) */}
+            <div className="pt-1 border-t border-slate-200/70 flex items-center justify-between text-[10px] text-slate-500">
+              <span className="font-semibold text-slate-400">Pengujian Simulasi GPS:</span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleSimulateInside}
+                  className={`px-2 py-0.5 rounded-lg border text-[10px] font-semibold transition-colors ${
+                    isSimulated && inRadius
+                      ? "bg-emerald-600 text-white border-emerald-600"
+                      : "bg-white hover:bg-slate-100 text-slate-700 border-slate-200"
+                  }`}
+                  title="Simulasi berada di dalam radius kantor (presensi diizinkan)"
+                >
+                  📍 Di Kantor (Sah)
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSimulateOutside}
+                  className={`px-2 py-0.5 rounded-lg border text-[10px] font-semibold transition-colors ${
+                    isSimulated && !inRadius
+                      ? "bg-rose-600 text-white border-rose-600"
+                      : "bg-white hover:bg-slate-100 text-slate-700 border-slate-200"
+                  }`}
+                  title="Simulasi berada di luar radius kantor (presensi diblokir total)"
+                >
+                  🚫 Di Luar (Blokir)
+                </button>
+                {isSimulated && (
+                  <button
+                    type="button"
+                    onClick={captureLocation}
+                    className="px-1.5 py-0.5 rounded-lg bg-slate-200 text-slate-700 hover:bg-slate-300 font-medium"
+                    title="Kembali ke GPS riil perangkat"
+                  >
+                    GPS Asli
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Optional Notes Field */}
@@ -511,30 +695,48 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
               type="text"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Contoh: Bertugas di gedung cabang / Kendala lalu lintas"
+              placeholder="Catatan tambahan presensi..."
               className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             />
           </div>
         </div>
 
         {/* Footer Actions */}
-        <div className="p-4 bg-slate-50 border-t border-slate-200/80 flex items-center justify-end gap-2 shrink-0">
+        <div className="p-4 bg-slate-50 border-t border-slate-200/80 flex items-center justify-between gap-2 shrink-0">
           <button
             onClick={onClose}
             className="px-4 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 font-semibold text-xs active:scale-95 transition-all"
           >
             Batal
           </button>
+
+          {/* Submit Attendance Button - STRICTLY LOCKED WHEN !inRadius */}
           <button
             id="submit-attendance-final-btn"
             onClick={handleSubmit}
-            disabled={!capturedPhoto || isSubmitting}
-            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs shadow-md shadow-blue-500/20 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+            disabled={!capturedPhoto || isSubmitting || gpsLoading || !inRadius}
+            className={`px-5 py-2.5 rounded-xl font-bold text-xs shadow-md active:scale-95 transition-all flex items-center gap-1.5 ${
+              !inRadius || gpsLoading
+                ? "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed shadow-none"
+                : !capturedPhoto
+                ? "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed shadow-none"
+                : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-blue-500/20"
+            }`}
           >
             {isSubmitting ? (
               <>
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>Memproses...</span>
+                <span>{submittingStatus || "Memproses..."}</span>
+              </>
+            ) : gpsLoading ? (
+              <>
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-slate-400" />
+                <span>Mengecek Radius GPS...</span>
+              </>
+            ) : !inRadius ? (
+              <>
+                <Lock className="w-3.5 h-3.5 text-rose-500" />
+                <span>Presensi Diblokir (Di Luar Radius)</span>
               </>
             ) : (
               <>

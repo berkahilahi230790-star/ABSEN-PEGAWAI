@@ -23,6 +23,8 @@ import {
   ExternalLink,
   Sparkles,
   RefreshCw,
+  Cloud,
+  Database,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
@@ -54,6 +56,7 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(currentEmployee.id);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
+  const [selectedRecordForPreview, setSelectedRecordForPreview] = useState<AttendanceRecord | null>(null);
   const [showPrintSlip, setShowPrintSlip] = useState(false);
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
@@ -69,6 +72,9 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
     description: string;
     itemCount?: number;
     details?: string[];
+    confirmButtonText?: string;
+    secondaryButtonText?: string;
+    onSecondaryAction?: () => void;
     onConfirm: () => Promise<void>;
   } | null>(null);
 
@@ -212,19 +218,7 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
   };
 
   // Trigger Google Drive Report Upload with Confirmation Dialog
-  const handlePromptGoogleDriveExport = async () => {
-    let token = await getAccessToken();
-    if (!token) {
-      try {
-        const authRes = await googleSignIn();
-        if (!authRes) return;
-        token = authRes.accessToken;
-      } catch (e: any) {
-        showNotification("Gagal masuk dengan Google. Silakan coba lagi.");
-        return;
-      }
-    }
-
+  const handlePromptGoogleDriveExport = () => {
     const cleanComp = branding.companyName.replace(/[^a-zA-Z0-9]/g, "_");
     const cleanEmp = targetEmployee.name.replace(/[^a-zA-Z0-9]/g, "_");
     const fileName = `Laporan_Presensi_${cleanComp}_${cleanEmp}_${selectedMonth}.xlsx`;
@@ -232,16 +226,42 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
     setConfirmConfig({
       actionType: "drive_upload",
       title: "Simpan Laporan ke Google Drive",
-      description: `Berkas laporan presensi "${fileName}" akan diunggah dan diarsipkan langsung ke akun Google Drive Anda.`,
+      description: `Berkas laporan presensi "${fileName}" akan diunggah dan diarsipkan langsung ke Google Drive akun Anda. Tidak perlu memasukkan link tempat penyimpanan.`,
       itemCount: monthlyRecords.length,
+      confirmButtonText: "Simpan ke Google Drive",
+      secondaryButtonText: "Unduh File Excel Langsung (.xlsx)",
+      onSecondaryAction: () => {
+        setWorkspaceConfirmOpen(false);
+        handleExportExcel();
+      },
       details: [
         `Nama berkas: ${fileName}`,
         `Tipe berkas: Microsoft Excel (.xlsx)`,
-        `Data: ${monthlyRecords.length} catatan presensi bulan ${selectedMonth}`,
+        `Lokasi: Google Drive Utama (atau folder yang disetel di Pengaturan)`,
+        `Petunjuk Login: Jika muncul jendela 'Bantuan Akun Google' / checklist pemulihan, cukup klik tanda (X) atau klik 'Lanjutkan' untuk mengizinkan akses.`,
       ],
       onConfirm: async () => {
         setIsSavingDrive(true);
         try {
+          let token = await getAccessToken();
+          if (!token) {
+            try {
+              const authRes = await googleSignIn();
+              if (!authRes) {
+                setIsSavingDrive(false);
+                return;
+              }
+              token = authRes.accessToken;
+            } catch (authErr: any) {
+              setIsSavingDrive(false);
+              showNotification(
+                authErr?.message ||
+                  "Gagal menghubungkan Google Drive. Anda juga dapat memilih 'Unduh File Excel Langsung'."
+              );
+              return;
+            }
+          }
+
           const wb = createExcelWorkbook();
           const excelBuffer = XLSX.write(wb, { bookType: "xlsx", type: "array" });
           const blob = new Blob([excelBuffer], {
@@ -617,13 +637,16 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                 <div className="flex items-center gap-3">
                   {/* Face Thumbnail */}
                   <button
-                    onClick={() => rec.facePhotoUrl && setPreviewPhotoUrl(rec.facePhotoUrl)}
+                    onClick={() => {
+                      setSelectedRecordForPreview(rec);
+                      setPreviewPhotoUrl(rec.facePhotoUrl || rec.facePhotoDriveUrl || null);
+                    }}
                     className="w-10 h-10 rounded-xl overflow-hidden bg-slate-100 border border-slate-200 shrink-0 relative group"
-                    title="Klik untuk lihat foto verifikasi"
+                    title="Klik untuk lihat foto verifikasi & detail GPS Firestore"
                   >
-                    {rec.facePhotoUrl ? (
+                    {rec.facePhotoUrl || rec.facePhotoDriveUrl ? (
                       <img
-                        src={rec.facePhotoUrl}
+                        src={rec.facePhotoUrl || rec.facePhotoDriveUrl}
                         alt="Face Photo"
                         className="w-full h-full object-cover"
                       />
@@ -634,6 +657,14 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
                     )}
                     {rec.verifiedByFace && (
                       <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white" />
+                    )}
+                    {rec.facePhotoDriveUrl && (
+                      <span
+                        className="absolute top-0 right-0 w-3.5 h-3.5 bg-blue-600 text-white rounded-bl flex items-center justify-center"
+                        title="Tersimpan di Google Drive"
+                      >
+                        <HardDrive className="w-2.5 h-2.5" />
+                      </span>
                     )}
                   </button>
 
@@ -687,28 +718,106 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
         )}
       </div>
 
-      {/* Photo Enlarge Modal */}
+      {/* Photo Enlarge Modal with GPS & Storage Info */}
       {previewPhotoUrl && (
         <div
-          onClick={() => setPreviewPhotoUrl(null)}
+          onClick={() => {
+            setPreviewPhotoUrl(null);
+            setSelectedRecordForPreview(null);
+          }}
           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-xs animate-in fade-in"
         >
-          <div className="bg-white p-3 rounded-2xl max-w-sm w-full overflow-hidden text-center shadow-2xl">
-            <h4 className="text-xs font-bold text-slate-800 mb-2">Foto Verifikasi Wajah Biometrik</h4>
-            <img
-              src={previewPhotoUrl}
-              alt="Preview"
-              className="w-full aspect-square object-cover rounded-xl border border-slate-200"
-            />
-            <p className="text-[10px] text-slate-500 mt-2">
-              Terverifikasi oleh sistem kamera deteksi wajah PresensiGo
-            </p>
-            <button
-              onClick={() => setPreviewPhotoUrl(null)}
-              className="mt-3 px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold"
-            >
-              Tutup
-            </button>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white p-4 rounded-3xl max-w-sm w-full overflow-hidden text-center shadow-2xl border border-slate-200"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-left">
+                <h4 className="text-xs font-bold text-slate-800">
+                  {selectedRecordForPreview?.employeeName || "Foto Verifikasi Wajah"}
+                </h4>
+                <p className="text-[10px] text-slate-500">
+                  {selectedRecordForPreview?.date} • {selectedRecordForPreview?.checkInTime || selectedRecordForPreview?.checkOutTime || "-"}
+                </p>
+              </div>
+              {selectedRecordForPreview?.facePhotoDriveUrl ? (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 flex items-center gap-1">
+                  <HardDrive className="w-3 h-3" />
+                  Google Drive
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">
+                  Lokal
+                </span>
+              )}
+            </div>
+
+            <div className="relative rounded-2xl overflow-hidden border border-slate-200 aspect-square mb-3">
+              <img
+                src={previewPhotoUrl}
+                alt="Preview"
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-md text-[10px] text-white flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                <span>AI Face Match</span>
+              </div>
+            </div>
+
+            {/* GPS Details from Firestore */}
+            <div className="text-left bg-slate-50 p-2.5 rounded-2xl border border-slate-100 text-[11px] space-y-1.5 mb-3">
+              <div className="flex items-center justify-between text-slate-500">
+                <span className="flex items-center gap-1">
+                  <MapPin className="w-3 h-3 text-blue-500" />
+                  Koordinat GPS:
+                </span>
+                <span className="font-mono font-medium text-slate-800">
+                  {selectedRecordForPreview?.location
+                    ? `${selectedRecordForPreview.location.latitude.toFixed(5)}, ${selectedRecordForPreview.location.longitude.toFixed(5)}`
+                    : "-"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-slate-500">
+                <span>Radius Geofence:</span>
+                <span className={`font-semibold ${selectedRecordForPreview?.location?.inRadius ? "text-emerald-600" : "text-amber-600"}`}>
+                  {selectedRecordForPreview?.location?.distanceMeters} meter ({selectedRecordForPreview?.location?.inRadius ? "Dalam Radius" : "Luar Radius"})
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-slate-500">
+                <span className="flex items-center gap-1">
+                  <Database className="w-3 h-3 text-indigo-500" />
+                  Database:
+                </span>
+                <span className="font-semibold text-indigo-600">
+                  Cloud Firestore
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              {selectedRecordForPreview?.facePhotoDriveUrl && (
+                <a
+                  href={selectedRecordForPreview.facePhotoDriveUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                  title="Buka berkas foto asli di Google Drive"
+                >
+                  <HardDrive className="w-3.5 h-3.5" />
+                  <span>Buka di Drive</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+              <button
+                onClick={() => {
+                  setPreviewPhotoUrl(null);
+                  setSelectedRecordForPreview(null);
+                }}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold active:scale-95 transition-all"
+              >
+                Tutup
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -894,7 +1003,9 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
         itemDetails={confirmConfig?.details}
         actionType={confirmConfig?.actionType || "sheets_sync"}
         isProcessing={isSyncingSheets || isSavingDrive}
-        confirmButtonText={confirmConfig?.actionType === "drive_upload" ? "Ya, Simpan ke Drive" : "Ya, Sinkronkan"}
+        confirmButtonText={confirmConfig?.confirmButtonText || (confirmConfig?.actionType === "drive_upload" ? "Ya, Simpan ke Drive" : "Ya, Sinkronkan")}
+        secondaryButtonText={confirmConfig?.secondaryButtonText}
+        onSecondaryAction={confirmConfig?.onSecondaryAction}
       />
     </div>
   );

@@ -14,6 +14,10 @@ import {
   ExternalLink,
   MessageSquare,
   Filter,
+  Building,
+  Users,
+  MapPin,
+  UserPlus,
 } from "lucide-react";
 import { AttendanceRecord, EmployeeProfile, LeaveRequest, WorkScheduleConfig } from "../types";
 import { audioNotificationService } from "../services/audioNotification";
@@ -32,6 +36,8 @@ interface ManagerDashboardProps {
   onOpenSettings?: () => void;
   onOpenReports?: () => void;
   onSwitchToEmployee?: () => void;
+  onOpenTempatTugas?: () => void;
+  onOpenPegawai?: () => void;
 }
 
 export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
@@ -44,6 +50,8 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
   onOpenSettings,
   onOpenReports,
   onSwitchToEmployee,
+  onOpenTempatTugas,
+  onOpenPegawai,
 }) => {
   const [activeTab, setActiveTab] = useState<"approvals" | "monitoring">("approvals");
   const [reviewNote, setReviewNote] = useState<{ [id: string]: string }>({});
@@ -153,8 +161,9 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
         </div>
       </div>
 
-      {/* Admin Action Bar: Kelola Cuti & Laporan */}
+      {/* Admin Action Bar: 4 Core Management Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        {/* Card 1: Kelola Cuti */}
         <button
           id="btn-admin-kelola-cuti"
           onClick={() => {
@@ -162,7 +171,7 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
             const el = document.getElementById("section-kelola-cuti");
             if (el) el.scrollIntoView({ behavior: "smooth" });
           }}
-          className={`p-3.5 rounded-2xl bg-white border transition-all text-left flex items-center justify-between gap-3 group ${
+          className={`p-3.5 rounded-2xl bg-white border transition-all text-left flex items-center justify-between gap-3 group cursor-pointer ${
             activeTab === "approvals"
               ? "border-blue-500 ring-2 ring-blue-100 shadow-xs"
               : "border-slate-200 hover:border-blue-300 hover:shadow-xs"
@@ -194,9 +203,62 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({
           </span>
         </button>
 
+        {/* Card 2: Halaman Tempat Tugas & Download GPS */}
+        <button
+          id="btn-admin-tempat-tugas"
+          onClick={onOpenTempatTugas}
+          className="p-3.5 rounded-2xl bg-white border border-slate-200 hover:border-indigo-300 hover:shadow-xs transition-all text-left flex items-center justify-between gap-3 group cursor-pointer"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-xs">
+              <Building className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <h4 className="text-xs font-bold text-slate-900 leading-tight">Halaman Tempat Tugas</h4>
+                <span className="px-1.5 py-0.2 rounded-md bg-indigo-100 text-indigo-800 text-[9px] font-bold">
+                  Titik GPS
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-0.5">Nama tempat tugas & download data titik GPS kantor</p>
+            </div>
+          </div>
+          <span className="text-xs font-bold text-indigo-600 group-hover:translate-x-0.5 transition-transform shrink-0 flex items-center gap-0.5">
+            <span>Buka</span>
+            <span>&rarr;</span>
+          </span>
+        </button>
+
+        {/* Card 3: Halaman Pegawai */}
+        <button
+          id="btn-admin-pegawai"
+          onClick={onOpenPegawai}
+          className="p-3.5 rounded-2xl bg-white border border-slate-200 hover:border-purple-300 hover:shadow-xs transition-all text-left flex items-center justify-between gap-3 group cursor-pointer"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-xs">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <h4 className="text-xs font-bold text-slate-900 leading-tight">Halaman Pegawai</h4>
+                <span className="px-1.5 py-0.2 rounded-md bg-purple-100 text-purple-800 text-[9px] font-bold">
+                  {employees.length} Staf
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-0.5">Identitas, jabatan (Guru, Kadis, Kabid, dll.) & penempatan</p>
+            </div>
+          </div>
+          <span className="text-xs font-bold text-purple-600 group-hover:translate-x-0.5 transition-transform shrink-0 flex items-center gap-0.5">
+            <span>Buka</span>
+            <span>&rarr;</span>
+          </span>
+        </button>
+
+        {/* Card 4: Laporan Bulanan */}
         <button
           onClick={onOpenReports}
-          className="p-3.5 rounded-2xl bg-white border border-slate-200 hover:border-emerald-300 hover:shadow-xs transition-all text-left flex items-center justify-between gap-3 group"
+          className="p-3.5 rounded-2xl bg-white border border-slate-200 hover:border-emerald-300 hover:shadow-xs transition-all text-left flex items-center justify-between gap-3 group cursor-pointer"
         >
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-xs">

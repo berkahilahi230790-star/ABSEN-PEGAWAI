@@ -1,4 +1,4 @@
-export type UserRole = "employee" | "manager" | "admin";
+export type UserRole = "employee" | "pimpinan" | "manager" | "admin";
 
 export type AttendanceStatus = "tepat_waktu" | "terlambat" | "izin" | "sakit" | "alpa";
 
@@ -26,6 +26,10 @@ export interface AttendanceRecord {
     inRadius: boolean;
   };
   facePhotoUrl?: string;
+  facePhotoDriveUrl?: string;
+  facePhotoDriveFileId?: string;
+  syncedToFirestore?: boolean;
+  firestoreId?: string;
   verifiedByFace: boolean;
   notes?: string;
 }
@@ -98,13 +102,41 @@ export interface WorkScheduleConfig {
   enableFiveMinWarning: boolean;
 }
 
+export interface WorkLocation {
+  id: string;
+  name: string; // Nama Tempat Tugas (misal: "Dinas Pendidikan", "SMP Negeri 1", dll.)
+  address: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+  description?: string;
+  isMainOffice?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export const JABATAN_OPTIONS = [
+  "Guru",
+  "Kepala Sekolah",
+  "Staf",
+  "Kasi",
+  "Kasubag",
+  "Kabid",
+  "Kadis",
+] as const;
+
+export type JabatanType = (typeof JABATAN_OPTIONS)[number] | string;
+
 export interface EmployeeProfile {
   id: string;
   name: string;
+  nip?: string;
   email: string;
   role: UserRole;
   position: string;
   department: string;
+  workLocationId?: string;
+  workLocationName?: string;
   avatarUrl: string;
   annualLeaveQuota: number;
   usedLeave: number;

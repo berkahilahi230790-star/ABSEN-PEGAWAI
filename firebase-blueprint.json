@@ -1,0 +1,136 @@
+{
+  "entities": {
+    "attendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Catatan absensi pegawai termasuk koordinat GPS, nama, waktu, dan URL foto Google Drive",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100 },
+        "employeeId": { "type": "string", "maxLength": 50 },
+        "employeeName": { "type": "string", "maxLength": 100 },
+        "department": { "type": "string", "maxLength": 100 },
+        "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "checkInTime": { "type": "string", "maxLength": 20 },
+        "checkOutTime": { "type": "string", "maxLength": 20 },
+        "status": {
+          "type": "string",
+          "enum": ["tepat_waktu", "terlambat", "izin", "sakit", "alpa"]
+        },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "address": { "type": "string", "maxLength": 300 },
+        "distanceMeters": { "type": "number" },
+        "inRadius": { "type": "boolean" },
+        "verifiedByFace": { "type": "boolean" },
+        "faceConfidence": { "type": "number" },
+        "facePhotoDriveUrl": { "type": "string", "maxLength": 1000 },
+        "facePhotoDriveFileId": { "type": "string", "maxLength": 200 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "employeeId", "employeeName", "date", "status"]
+    },
+    "employee": {
+      "title": "EmployeeProfile",
+      "description": "Profil data pegawai perusahaan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 50 },
+        "name": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "format": "email", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["employee", "manager", "admin"] },
+        "position": { "type": "string", "maxLength": 100 },
+        "department": { "type": "string", "maxLength": 100 },
+        "avatarUrl": { "type": "string", "maxLength": 1000 },
+        "annualLeaveQuota": { "type": "number" },
+        "usedLeave": { "type": "number" },
+        "phone": { "type": "string", "maxLength": 30 }
+      },
+      "required": ["id", "name", "email", "role", "department"]
+    },
+    "leaveRequest": {
+      "title": "LeaveRequest",
+      "description": "Pengajuan cuti atau izin dinas pegawai",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100 },
+        "employeeId": { "type": "string", "maxLength": 50 },
+        "employeeName": { "type": "string", "maxLength": 100 },
+        "department": { "type": "string", "maxLength": 100 },
+        "leaveType": {
+          "type": "string",
+          "enum": ["cuti_tahunan", "sakit", "izin_khusus", "dinas_luar"]
+        },
+        "startDate": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "endDate": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "totalDays": { "type": "number" },
+        "reason": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "submittedAt": { "type": "string", "maxLength": 50 },
+        "reviewedBy": { "type": "string", "maxLength": 100 },
+        "reviewedAt": { "type": "string", "maxLength": 50 },
+        "managerNotes": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["id", "employeeId", "employeeName", "leaveType", "startDate", "endDate", "status"]
+    },
+    "workSchedule": {
+      "title": "WorkSchedule",
+      "description": "Konfigurasi jam kerja dan lokasi geofence kantor",
+      "type": "object",
+      "properties": {
+        "checkInTime": { "type": "string", "maxLength": 10 },
+        "lateToleranceMinutes": { "type": "number" },
+        "checkOutTime": { "type": "string", "maxLength": 10 },
+        "officeName": { "type": "string", "maxLength": 150 },
+        "officeAddress": { "type": "string", "maxLength": 300 },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "geofenceRadiusMeters": { "type": "number" },
+        "enableAiVoiceReminder": { "type": "boolean" },
+        "enableFiveMinWarning": { "type": "boolean" }
+      },
+      "required": ["checkInTime", "checkOutTime", "officeName", "latitude", "longitude", "geofenceRadiusMeters"]
+    },
+    "workLocation": {
+      "title": "WorkLocation",
+      "description": "Data tempat tugas kantor dan titik koordinat GPS",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100 },
+        "name": { "type": "string", "maxLength": 150 },
+        "address": { "type": "string", "maxLength": 300 },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "radiusMeters": { "type": "number" },
+        "description": { "type": "string", "maxLength": 500 },
+        "isMainOffice": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "name", "latitude", "longitude", "radiusMeters"]
+    }
+  },
+  "firestore": {
+    "/attendance/{attendanceId}": {
+      "schema": { "$ref": "#/entities/attendanceRecord" },
+      "description": "Log kehadiran absensi pegawai dengan GPS, nama, verifikasi AI, dan URL Google Drive"
+    },
+    "/employees/{employeeId}": {
+      "schema": { "$ref": "#/entities/employee" },
+      "description": "Daftar pegawai aktif"
+    },
+    "/leaveRequests/{requestId}": {
+      "schema": { "$ref": "#/entities/leaveRequest" },
+      "description": "Permohonan izin dan cuti pegawai"
+    },
+    "/companySettings/{settingId}": {
+      "schema": { "$ref": "#/entities/workSchedule" },
+      "description": "Pengaturan jam kerja kantor dan radius geofence"
+    },
+    "/workLocations/{locationId}": {
+      "schema": { "$ref": "#/entities/workLocation" },
+      "description": "Daftar tempat tugas dan koordinat GPS kantor"
+    }
+  }
+}

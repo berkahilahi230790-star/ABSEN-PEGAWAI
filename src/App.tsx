@@ -14,6 +14,7 @@ import {
   ChatMessage,
   NotificationItem,
   Coordinates,
+  WorkLocation,
 } from "./types";
 import {
   getStoredAttendanceRecords,
@@ -22,12 +23,14 @@ import {
   getStoredEmployees,
   getStoredLeaveRequests,
   getStoredSchedule,
+  getStoredWorkLocations,
   saveAttendanceRecord,
   saveBranding,
   saveChatMessages,
   saveEmployees,
   saveLeaveRequests,
   saveSchedule,
+  saveWorkLocations,
   calculateDistanceMeters,
 } from "./services/storage";
 import { audioNotificationService } from "./services/audioNotification";
@@ -48,6 +51,9 @@ import { EmployeeIdentityModal } from "./components/EmployeeIdentityModal";
 import { ChangePasswordModal } from "./components/ChangePasswordModal";
 import { UploadPhotoModal } from "./components/UploadPhotoModal";
 import { GoogleWorkspaceModal } from "./components/GoogleWorkspaceModal";
+import { PimpinanGpsModal } from "./components/PimpinanGpsModal";
+import { TempatTugasView } from "./components/TempatTugasView";
+import { PegawaiView } from "./components/PegawaiView";
 import {
   initAuth,
   getAccessToken,
@@ -55,7 +61,22 @@ import {
 import {
   appendAttendanceToSheet,
   getGoogleAutoSyncEnabled,
+  uploadAttendancePhotoToGoogleDrive,
+  setStoredPhotoDriveFolder,
 } from "./services/googleWorkspace";
+import {
+  saveAttendanceToFirestore,
+  subscribeToAttendance,
+  testFirestoreConnection,
+  saveLeaveRequestToFirestore,
+  saveScheduleToFirestore,
+  fetchDrivePhotoFolderFromFirestore,
+  fetchWorkLocationsFromFirestore,
+  saveWorkLocationToFirestore,
+  deleteWorkLocationFromFirestore,
+  syncWorkLocationsToFirestore,
+  syncEmployeesToFirestore,
+} from "./services/firebase";
 
 import {
   Clock,
@@ -81,11 +102,14 @@ import {
   Bell,
   FileText,
   HardDrive,
+  Building,
+  Users,
 } from "lucide-react";
 
 export default function App() {
   // Application Data States
   const [employees, setEmployees] = useState<EmployeeProfile[]>(getStoredEmployees);
+  const [workLocations, setWorkLocations] = useState<WorkLocation[]>(getStoredWorkLocations);
   const [currentEmployee, setCurrentEmployee] = useState<EmployeeProfile>(employees[0]);
   const [currentRole, setCurrentRole] = useState<UserRole>("employee");
   const [schedule, setSchedule] = useState<WorkScheduleConfig>(getStoredSchedule);
@@ -95,7 +119,9 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(getStoredChatMessages);
 
   // Active Main Navigation Tab
-  const [currentView, setCurrentView] = useState<"home" | "report" | "manager" | "settings">("home");
+  const [currentView, setCurrentView] = useState<
+    "home" | "report" | "manager" | "settings" | "tempat_tugas" | "pegawai"
+  >("home");
   const [adminSettingsSubTab, setAdminSettingsSubTab] = useState<"schedule" | "gps" | "leave" | "branding" | "google">("schedule");
 
   const handleOpenBranding = () => {
@@ -113,6 +139,7 @@ export default function App() {
   const [showMobileNotifications, setShowMobileNotifications] = useState(false);
   const [googleModalOpen, setGoogleModalOpen] = useState(false);
   const [isGoogleConnected, setIsGoogleConnected] = useState(false);
+  const [pimpinanGpsModalOpen, setPimpinanGpsModalOpen] = useState(false);
 
   // Listen to Google auth state
   useEffect(() => {
@@ -126,6 +153,69 @@ export default function App() {
     );
     getAccessToken().then((t) => setIsGoogleConnected(Boolean(t)));
     return () => unsubscribe();
+  }, []);
+
+  // Firestore status & Realtime Listener
+  const [firestoreConnected, setFirestoreConnected] = useState(false);
+
+  useEffect(() => {
+    testFirestoreConnection().then((connected) => {
+      setFirestoreConnected(connected);
+    });
+
+    // Synchronize Google Drive photo folder location from Firestore
+    fetchDrivePhotoFolderFromFirestore().then((res) => {
+      if (res && res.photoFolderUrl) {
+        setStoredPhotoDriveFolder(res.photoFolderUrl);
+      }
+    });
+
+    // Synchronize work locations from Firestore
+    fetchWorkLocationsFromFirestore()
+      .then((remoteLocations) => {
+        if (remoteLocations && remoteLocations.length > 0) {
+          setWorkLocations(remoteLocations);
+          saveWorkLocations(remoteLocations);
+        } else {
+          const currentLocs = getStoredWorkLocations();
+          if (currentLocs && currentLocs.length > 0) {
+            syncWorkLocationsToFirestore(currentLocs).catch((e) =>
+              console.warn("Initial sync work locations to Firestore:", e)
+            );
+          }
+        }
+      })
+      .catch((e) => console.warn("Fetch remote work locations:", e));
+
+    try {
+      const unsubFirestore = subscribeToAttendance(
+        (firestoreRecords) => {
+          if (firestoreRecords && firestoreRecords.length > 0) {
+            setAttendanceRecords((prev) => {
+              const map = new Map<string, AttendanceRecord>();
+              prev.forEach((r) => map.set(r.id, r));
+              firestoreRecords.forEach((fr) => {
+                const existing = map.get(fr.id);
+                map.set(fr.id, {
+                  ...existing,
+                  ...fr,
+                  facePhotoUrl: existing?.facePhotoUrl || fr.facePhotoUrl,
+                  facePhotoDriveUrl: fr.facePhotoDriveUrl || existing?.facePhotoDriveUrl,
+                });
+              });
+              return Array.from(map.values());
+            });
+            setFirestoreConnected(true);
+          }
+        },
+        (err) => {
+          console.log("Firestore live sync listener:", err);
+        }
+      );
+      return () => unsubFirestore();
+    } catch (e) {
+      console.warn("Firestore subscription init error:", e);
+    }
   }, []);
 
   // Modals for Employee Identity, Password, and Photo / Account
@@ -144,6 +234,9 @@ export default function App() {
     );
     setEmployees(updatedEmployees);
     saveEmployees(updatedEmployees);
+    syncEmployeesToFirestore([updatedEmployee]).catch((e) =>
+      console.warn("Firestore employee update sync error:", e)
+    );
   };
 
   // Handler for saving employee photo
@@ -155,7 +248,19 @@ export default function App() {
   // Role switching handler
   const handleToggleRole = (newRole: UserRole) => {
     setCurrentRole(newRole);
-    if (newRole === "manager") {
+    if (newRole === "pimpinan") {
+      const pimpinan =
+        employees.find((e) => e.role === "pimpinan") ||
+        employees.find(
+          (e) =>
+            e.position?.toLowerCase().includes("pimpinan") ||
+            e.position?.toLowerCase().includes("direktur")
+        ) ||
+        employees[employees.length - 1];
+      setCurrentEmployee(pimpinan);
+      setCurrentView("home");
+      audioNotificationService.playChime("success");
+    } else if (newRole === "manager") {
       const mgr = employees.find((e) => e.role === "manager") || employees[3] || employees[0];
       setCurrentEmployee(mgr);
       setCurrentView("manager");
@@ -260,6 +365,8 @@ export default function App() {
         checkInTime: record.checkInTime || updatedList[existingIndex].checkInTime,
         location: record.location || updatedList[existingIndex].location,
         facePhotoUrl: record.facePhotoUrl || updatedList[existingIndex].facePhotoUrl,
+        facePhotoDriveUrl: record.facePhotoDriveUrl || updatedList[existingIndex].facePhotoDriveUrl,
+        facePhotoDriveFileId: record.facePhotoDriveFileId || updatedList[existingIndex].facePhotoDriveFileId,
         notes: record.notes || updatedList[existingIndex].notes,
       };
     } else {
@@ -269,7 +376,50 @@ export default function App() {
     setAttendanceRecords(updatedList);
     saveAttendanceRecord(record);
 
-    // Auto-sync ke Google Sheets jika akun Google terhubung dan autoSync aktif
+    // 1. Save to Cloud Firestore (GPS, employee identity, status, and Google Drive URL)
+    saveAttendanceToFirestore(record)
+      .then(() => {
+        handleTriggerVoiceToast(
+          record.facePhotoDriveUrl ? "Drive & Firestore Aktif" : "Tersimpan ke Firestore",
+          record.facePhotoDriveUrl
+            ? `Foto ${record.employeeName} diunggah ke Google Drive & data GPS tersimpan di Firestore.`
+            : `Data GPS & presensi ${record.employeeName} tersimpan di Cloud Firestore.`
+        );
+      })
+      .catch((err) => {
+        console.warn("Firestore save warning:", err);
+      });
+
+    // 2. Fallback upload to Google Drive if photo exists and not yet uploaded
+    if (
+      record.facePhotoUrl &&
+      record.facePhotoUrl.startsWith("data:") &&
+      !record.facePhotoDriveUrl
+    ) {
+      uploadAttendancePhotoToGoogleDrive(
+        record.facePhotoUrl,
+        record.employeeName,
+        record.date,
+        record.checkInTime || record.checkOutTime || "08-00-00"
+      )
+        .then((driveRes) => {
+          if (driveRes) {
+            const updatedWithDrive: AttendanceRecord = {
+              ...record,
+              facePhotoDriveUrl: driveRes.webViewLink,
+              facePhotoDriveFileId: driveRes.fileId,
+            };
+            saveAttendanceToFirestore(updatedWithDrive);
+            saveAttendanceRecord(updatedWithDrive);
+            setAttendanceRecords((prev) =>
+              prev.map((r) => (r.id === record.id ? updatedWithDrive : r))
+            );
+          }
+        })
+        .catch((e) => console.warn("Background Drive upload error:", e));
+    }
+
+    // 3. Auto-sync ke Google Sheets jika akun Google terhubung dan autoSync aktif
     getAccessToken().then((token) => {
       if (token && getGoogleAutoSyncEnabled()) {
         appendAttendanceToSheet(record)
@@ -290,6 +440,9 @@ export default function App() {
     const updated = [request, ...leaveRequests];
     setLeaveRequests(updated);
     saveLeaveRequests(updated);
+    saveLeaveRequestToFirestore(request).catch((err) =>
+      console.warn("Firestore leave request save:", err)
+    );
   };
 
   const handleReviewLeaveRequest = (
@@ -337,6 +490,98 @@ export default function App() {
   const handleSaveSchedule = (newSchedule: WorkScheduleConfig) => {
     setSchedule(newSchedule);
     saveSchedule(newSchedule);
+    saveScheduleToFirestore(newSchedule).catch((e) =>
+      console.warn("Firestore schedule save error:", e)
+    );
+
+    // Synchronize main office in workLocations
+    setWorkLocations((prev) => {
+      const mainIdx = prev.findIndex((loc) => loc.isMainOffice);
+      let updated: WorkLocation[];
+      if (mainIdx >= 0) {
+        updated = [...prev];
+        updated[mainIdx] = {
+          ...updated[mainIdx],
+          name: newSchedule.officeName,
+          address: newSchedule.officeAddress,
+          latitude: newSchedule.officeCoordinates.latitude,
+          longitude: newSchedule.officeCoordinates.longitude,
+          radiusMeters: newSchedule.geofenceRadiusMeters,
+        };
+        saveWorkLocationToFirestore(updated[mainIdx]).catch(() => {});
+      } else {
+        const newMain: WorkLocation = {
+          id: "loc-main",
+          name: newSchedule.officeName,
+          address: newSchedule.officeAddress,
+          latitude: newSchedule.officeCoordinates.latitude,
+          longitude: newSchedule.officeCoordinates.longitude,
+          radiusMeters: newSchedule.geofenceRadiusMeters,
+          isMainOffice: true,
+          description: "Kantor Pusat / Titik Presensi Pimpinan",
+        };
+        updated = [newMain, ...prev];
+        saveWorkLocationToFirestore(newMain).catch(() => {});
+      }
+      saveWorkLocations(updated);
+      return updated;
+    });
+  };
+
+  const handleSaveWorkLocation = (location: WorkLocation) => {
+    const index = workLocations.findIndex((l) => l.id === location.id);
+    let updated: WorkLocation[];
+    if (index >= 0) {
+      updated = [...workLocations];
+      updated[index] = location;
+    } else {
+      updated = [location, ...workLocations];
+    }
+    setWorkLocations(updated);
+    saveWorkLocations(updated);
+    saveWorkLocationToFirestore(location).catch((e) =>
+      console.warn("Firestore work location save error:", e)
+    );
+  };
+
+  const handleDeleteWorkLocation = (id: string) => {
+    const updated = workLocations.filter((l) => l.id !== id);
+    setWorkLocations(updated);
+    saveWorkLocations(updated);
+    deleteWorkLocationFromFirestore(id).catch((e) =>
+      console.warn("Firestore work location delete error:", e)
+    );
+  };
+
+  const handleSaveEmployee = (emp: EmployeeProfile) => {
+    const index = employees.findIndex((e) => e.id === emp.id);
+    let updated: EmployeeProfile[];
+    if (index >= 0) {
+      updated = [...employees];
+      updated[index] = emp;
+    } else {
+      updated = [emp, ...employees];
+    }
+    setEmployees(updated);
+    saveEmployees(updated);
+    syncEmployeesToFirestore(updated).catch((e) =>
+      console.warn("Firestore employees sync error:", e)
+    );
+    if (currentEmployee.id === emp.id) {
+      setCurrentEmployee(emp);
+    }
+  };
+
+  const handleDeleteEmployee = (empId: string) => {
+    const updated = employees.filter((e) => e.id !== empId);
+    setEmployees(updated);
+    saveEmployees(updated);
+    syncEmployeesToFirestore(updated).catch((e) =>
+      console.warn("Firestore employees sync error:", e)
+    );
+    if (currentEmployee.id === empId && updated.length > 0) {
+      setCurrentEmployee(updated[0]);
+    }
   };
 
   const handleSaveBranding = (newBranding: CompanyBranding) => {
@@ -514,13 +759,20 @@ export default function App() {
             <button
               onClick={() => setRoleModalOpen(true)}
               className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 border transition-all cursor-pointer ${
-                currentRole === "manager"
+                currentRole === "pimpinan"
+                  ? "bg-purple-50 text-purple-900 border-purple-300 hover:bg-purple-100"
+                  : currentRole === "manager"
                   ? "bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100"
                   : "bg-blue-50 text-blue-900 border-blue-300 hover:bg-blue-100"
               }`}
               title="Pilih Role Tampilan"
             >
-              {currentRole === "manager" ? (
+              {currentRole === "pimpinan" ? (
+                <>
+                  <Award className="w-3 h-3 text-purple-700" />
+                  <span>Pimpinan</span>
+                </>
+              ) : currentRole === "manager" ? (
                 <>
                   <Shield className="w-3 h-3 text-amber-700" />
                   <span>Admin</span>
@@ -539,53 +791,69 @@ export default function App() {
       {/* Main Content Container */}
       <main className="flex-1 w-full max-w-4xl mx-auto px-3 sm:px-4 py-3 flex flex-col">
         {/* Interactive Role Switcher Selector Bar */}
-        <div className="mb-3 p-2 rounded-2xl bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-md flex items-center justify-between gap-2 border border-slate-800 shrink-0">
+        <div className="mb-3 p-2 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shadow-md flex items-center justify-between gap-2 border border-slate-800 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
-                <div className="w-7 h-7 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center shrink-0 border border-blue-400/30">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                </div>
-                <div className="truncate">
-                  <span className="text-[10px] text-slate-300 font-medium block leading-none">Pilihan Tampilan:</span>
-                  <span className="text-xs font-extrabold text-white truncate">
-                    {currentRole === "manager" ? "🛡️ Mode Admin Kepegawaian" : "👤 Mode Pegawai"}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  id="switch-to-employee-tab"
-                  onClick={() => handleToggleRole("employee")}
-                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all ${
-                    currentRole === "employee"
-                      ? "bg-blue-600 text-white shadow-xs"
-                      : "bg-white/10 hover:bg-white/20 text-slate-300"
-                  }`}
-                  title="Ganti ke Tampilan Pegawai"
-                >
-                  Pegawai
-                </button>
-                <button
-                  id="switch-to-admin-tab"
-                  onClick={() => handleToggleRole("manager")}
-                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all ${
-                    currentRole === "manager"
-                      ? "bg-amber-400 text-slate-950 shadow-xs"
-                      : "bg-white/10 hover:bg-white/20 text-slate-300"
-                  }`}
-                  title="Ganti ke Tampilan Admin Kepegawaian"
-                >
-                  Admin
-                </button>
-                <button
-                  onClick={() => setRoleModalOpen(true)}
-                  className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-colors"
-                  title="Buka panduan & perbandingan fitur role"
-                >
-                  <HelpCircle className="w-3.5 h-3.5" />
-                </button>
-              </div>
+            <div className="w-7 h-7 rounded-xl bg-purple-500/20 text-purple-300 flex items-center justify-center shrink-0 border border-purple-400/30">
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
             </div>
+            <div className="truncate">
+              <span className="text-[10px] text-slate-300 font-medium block leading-none">Pilihan Tampilan:</span>
+              <span className="text-xs font-extrabold text-white truncate">
+                {currentRole === "pimpinan"
+                  ? "👑 Mode Pimpinan (Direksi)"
+                  : currentRole === "manager"
+                  ? "🛡️ Mode Admin Kepegawaian"
+                  : "👤 Mode Pegawai"}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              id="switch-to-employee-tab"
+              onClick={() => handleToggleRole("employee")}
+              className={`px-2 py-1 rounded-xl text-[10px] sm:text-[11px] font-bold transition-all cursor-pointer ${
+                currentRole === "employee"
+                  ? "bg-blue-600 text-white shadow-xs"
+                  : "bg-white/10 hover:bg-white/20 text-slate-300"
+              }`}
+              title="Ganti ke Tampilan Pegawai"
+            >
+              Pegawai
+            </button>
+            <button
+              id="switch-to-pimpinan-tab"
+              onClick={() => handleToggleRole("pimpinan")}
+              className={`px-2 py-1 rounded-xl text-[10px] sm:text-[11px] font-bold transition-all cursor-pointer ${
+                currentRole === "pimpinan"
+                  ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-xs font-extrabold"
+                  : "bg-white/10 hover:bg-white/20 text-slate-300"
+              }`}
+              title="Ganti ke Tampilan Pimpinan (Fitur Karyawan + Laporan + GPS Kantor)"
+            >
+              Pimpinan
+            </button>
+            <button
+              id="switch-to-admin-tab"
+              onClick={() => handleToggleRole("manager")}
+              className={`px-2 py-1 rounded-xl text-[10px] sm:text-[11px] font-bold transition-all cursor-pointer ${
+                currentRole === "manager"
+                  ? "bg-amber-400 text-slate-950 shadow-xs font-extrabold"
+                  : "bg-white/10 hover:bg-white/20 text-slate-300"
+              }`}
+              title="Ganti ke Tampilan Admin Kepegawaian"
+            >
+              Admin
+            </button>
+            <button
+              onClick={() => setRoleModalOpen(true)}
+              className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              title="Buka panduan & perbandingan fitur role"
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
 
             {/* View: Home / Pegawai Beranda */}
             {currentView === "home" && (
@@ -623,6 +891,7 @@ export default function App() {
                     onOpenLeaveRequest={() => setLeaveModalOpen(true)}
                     onOpenChat={() => setChatModalOpen(true)}
                     onOpenReports={() => setCurrentView("report")}
+                    onOpenPimpinanGps={() => setPimpinanGpsModalOpen(true)}
                     onOpenSettings={() => {
                       setAdminSettingsSubTab("schedule");
                       setCurrentView("settings");
@@ -777,6 +1046,32 @@ export default function App() {
                 onOpenSettings={() => setCurrentView("settings")}
                 onOpenReports={() => setCurrentView("report")}
                 onSwitchToEmployee={() => handleToggleRole("employee")}
+                onOpenTempatTugas={() => setCurrentView("tempat_tugas")}
+                onOpenPegawai={() => setCurrentView("pegawai")}
+              />
+            )}
+
+            {/* View: Tempat Tugas & Titik GPS */}
+            {currentView === "tempat_tugas" && (
+              <TempatTugasView
+                workLocations={workLocations}
+                onSaveLocation={handleSaveWorkLocation}
+                onDeleteLocation={handleDeleteWorkLocation}
+                schedule={schedule}
+                employees={employees}
+                onBack={() => setCurrentView("manager")}
+              />
+            )}
+
+            {/* View: Pegawai & Penempatan */}
+            {currentView === "pegawai" && (
+              <PegawaiView
+                employees={employees}
+                workLocations={workLocations}
+                onSaveEmployee={handleSaveEmployee}
+                onDeleteEmployee={handleDeleteEmployee}
+                onBack={() => setCurrentView("manager")}
+                onOpenTempatTugas={() => setCurrentView("tempat_tugas")}
               />
             )}
 
@@ -791,6 +1086,8 @@ export default function App() {
                 employees={employees}
                 onUpdateEmployeeQuota={handleUpdateEmployeeQuota}
                 attendanceRecords={attendanceRecords}
+                onOpenTempatTugas={() => setCurrentView("tempat_tugas")}
+                onOpenPegawai={() => setCurrentView("pegawai")}
               />
             )}
       </main>
@@ -798,7 +1095,80 @@ export default function App() {
       {/* Bottom Fixed Navigation Bar (Tailored to current role) */}
       <nav className="sticky bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-slate-200/90 py-2 px-3 z-30 shadow-lg shrink-0">
         <div className="max-w-md sm:max-w-lg mx-auto flex items-center justify-around">
-            {currentRole === "employee" ? (
+            {currentRole === "pimpinan" ? (
+              <>
+                <button
+                  id="tab-pimpinan-home"
+                  onClick={() => setCurrentView("home")}
+                  className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-2xl transition-all cursor-pointer ${
+                    currentView === "home"
+                      ? "text-purple-700 font-bold"
+                      : "text-slate-400 hover:text-slate-600 font-medium"
+                  }`}
+                >
+                  <div className={`p-1.5 rounded-xl transition-colors ${currentView === "home" ? "bg-purple-100/80 text-purple-700 shadow-2xs" : ""}`}>
+                    <Home className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px]">Beranda</span>
+                </button>
+
+                <button
+                  id="tab-pimpinan-reports"
+                  onClick={() => setCurrentView("report")}
+                  className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-2xl transition-all cursor-pointer ${
+                    currentView === "report"
+                      ? "text-purple-700 font-bold"
+                      : "text-slate-400 hover:text-slate-600 font-medium"
+                  }`}
+                  title="Laporan Presensi Karyawan"
+                >
+                  <div className={`p-1.5 rounded-xl transition-colors ${currentView === "report" ? "bg-purple-100/80 text-purple-700 shadow-2xs" : ""}`}>
+                    <FileSpreadsheet className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px]">Laporan</span>
+                </button>
+
+                {/* Center Quick Snap Presensi Button for Pimpinan */}
+                <button
+                  id="tab-quick-scan-pimpinan"
+                  onClick={() => openAttendance("in")}
+                  className="relative -top-4 w-13 h-13 rounded-2xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-blue-600 text-white flex flex-col items-center justify-center shadow-lg shadow-purple-500/40 border-2 border-white active:scale-95 transition-all group cursor-pointer"
+                  title="Presensi Wajah & GPS Cepat (Pimpinan)"
+                >
+                  <Sparkles className="w-6 h-6 group-hover:rotate-12 transition-transform text-amber-300" />
+                  <span className="text-[9px] font-bold mt-0.5">Absen</span>
+                </button>
+
+                <button
+                  id="tab-pimpinan-gps"
+                  onClick={() => setPimpinanGpsModalOpen(true)}
+                  className="flex flex-col items-center gap-0.5 py-1 px-3 rounded-2xl transition-all text-slate-400 hover:text-purple-700 font-medium cursor-pointer"
+                  title="Input Titik GPS dan Nama Kantor"
+                >
+                  <div className="p-1.5 rounded-xl hover:bg-purple-50">
+                    <MapPin className="w-5 h-5 text-indigo-600" />
+                  </div>
+                  <span className="text-[10px] text-indigo-600 font-semibold">Titik GPS</span>
+                </button>
+
+                <button
+                  id="tab-chat-pimpinan"
+                  onClick={() => setChatModalOpen(true)}
+                  className="flex flex-col items-center gap-0.5 py-1 px-3 rounded-2xl transition-all text-slate-400 hover:text-slate-600 font-medium relative cursor-pointer"
+                  title="Chat Admin"
+                >
+                  <div className="p-1.5 rounded-xl hover:bg-slate-100">
+                    <MessageSquare className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px]">Chat Admin</span>
+                  {chatMessages.filter((m) => m.sender === "admin").length > 0 && (
+                    <span className="absolute top-0 right-1 w-3.5 h-3.5 rounded-full bg-purple-600 text-white text-[8px] flex items-center justify-center font-bold">
+                      {chatMessages.filter((m) => m.sender === "admin").length}
+                    </span>
+                  )}
+                </button>
+              </>
+            ) : currentRole === "employee" ? (
               <>
                 <button
                   id="tab-home"
@@ -847,73 +1217,98 @@ export default function App() {
                 <button
                   id="tab-manager"
                   onClick={() => setCurrentView("manager")}
-                  className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-2xl transition-all relative ${
+                  className={`flex flex-col items-center gap-0.5 py-1 px-1.5 rounded-2xl transition-all relative ${
                     currentView === "manager"
                       ? "text-amber-600 font-bold"
                       : "text-slate-400 hover:text-slate-600 font-medium"
                   }`}
+                  title="Dasbor Kepegawaian & Verifikasi Cuti"
                 >
                   <div className={`p-1 rounded-xl transition-colors ${currentView === "manager" ? "bg-amber-50 text-amber-600" : ""}`}>
                     <Shield className="w-4 h-4" />
                   </div>
-                  <span className="text-[10px]">Kepegawaian</span>
+                  <span className="text-[9px] sm:text-[10px]">Dasbor</span>
                   {pendingLeavesCount > 0 && (
-                    <span className="absolute top-0 right-1 w-3.5 h-3.5 rounded-full bg-rose-500 text-white text-[9px] flex items-center justify-center font-bold">
+                    <span className="absolute top-0 right-1 w-3.5 h-3.5 rounded-full bg-rose-500 text-white text-[8px] flex items-center justify-center font-bold">
                       {pendingLeavesCount}
                     </span>
                   )}
                 </button>
 
                 <button
+                  id="tab-tempat-tugas"
+                  onClick={() => setCurrentView("tempat_tugas")}
+                  className={`flex flex-col items-center gap-0.5 py-1 px-1.5 rounded-2xl transition-all ${
+                    currentView === "tempat_tugas"
+                      ? "text-indigo-600 font-bold"
+                      : "text-slate-400 hover:text-slate-600 font-medium"
+                  }`}
+                  title="Kelola Tempat Tugas & Download Titik GPS Kantor"
+                >
+                  <div className={`p-1 rounded-xl transition-colors ${currentView === "tempat_tugas" ? "bg-indigo-50 text-indigo-600" : ""}`}>
+                    <Building className="w-4 h-4" />
+                  </div>
+                  <span className="text-[9px] sm:text-[10px]">Tempat Tugas</span>
+                </button>
+
+                <button
+                  id="tab-pegawai"
+                  onClick={() => setCurrentView("pegawai")}
+                  className={`flex flex-col items-center gap-0.5 py-1 px-1.5 rounded-2xl transition-all ${
+                    currentView === "pegawai"
+                      ? "text-purple-600 font-bold"
+                      : "text-slate-400 hover:text-slate-600 font-medium"
+                  }`}
+                  title="Daftar Pegawai, Jabatan, & Penempatan"
+                >
+                  <div className={`p-1 rounded-xl transition-colors ${currentView === "pegawai" ? "bg-purple-50 text-purple-600" : ""}`}>
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <span className="text-[9px] sm:text-[10px]">Pegawai</span>
+                </button>
+
+                <button
                   id="tab-report-all"
                   onClick={() => setCurrentView("report")}
-                  className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-2xl transition-all ${
+                  className={`flex flex-col items-center gap-0.5 py-1 px-1.5 rounded-2xl transition-all ${
                     currentView === "report"
                       ? "text-amber-600 font-bold"
                       : "text-slate-400 hover:text-slate-600 font-medium"
                   }`}
+                  title="Semua Rekap Laporan Presensi"
                 >
                   <div className={`p-1 rounded-xl transition-colors ${currentView === "report" ? "bg-amber-50 text-amber-600" : ""}`}>
                     <FileSpreadsheet className="w-4 h-4" />
                   </div>
-                  <span className="text-[10px]">Semua Laporan</span>
-                </button>
-
-                {/* Center Broadcast Audio Button for Admin */}
-                <button
-                  id="tab-broadcast-alarm"
-                  onClick={handleBroadcastLateWarning}
-                  className="relative -top-4 w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-500 text-slate-950 flex items-center justify-center shadow-lg shadow-amber-500/40 border-2 border-white active:scale-95 transition-all group"
-                  title="Broadcast Suara AI Peringatan 5 Menit"
-                >
-                  <BellRing className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                  <span className="text-[9px] sm:text-[10px]">Laporan</span>
                 </button>
 
                 <button
                   id="tab-settings"
                   onClick={() => setCurrentView("settings")}
-                  className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-2xl transition-all ${
+                  className={`flex flex-col items-center gap-0.5 py-1 px-1.5 rounded-2xl transition-all ${
                     currentView === "settings"
                       ? "text-amber-600 font-bold"
                       : "text-slate-400 hover:text-slate-600 font-medium"
                   }`}
+                  title="Pengaturan Presensi & GPS"
                 >
                   <div className={`p-1 rounded-xl transition-colors ${currentView === "settings" ? "bg-amber-50 text-amber-600" : ""}`}>
                     <Settings className="w-4 h-4" />
                   </div>
-                  <span className="text-[10px]">Pengaturan</span>
+                  <span className="text-[9px] sm:text-[10px]">Setelan</span>
                 </button>
 
                 <button
-                  id="tab-switch-emp"
-                  onClick={() => handleToggleRole("employee")}
-                  className="flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-2xl transition-all text-slate-400 hover:text-slate-600 font-medium"
-                  title="Ganti ke Tampilan Pegawai"
+                  id="tab-broadcast-alarm"
+                  onClick={handleBroadcastLateWarning}
+                  className="flex flex-col items-center gap-0.5 py-1 px-1.5 rounded-2xl transition-all text-amber-600 hover:text-orange-600 font-medium"
+                  title="Broadcast Suara AI Peringatan 5 Menit"
                 >
-                  <div className="p-1 rounded-xl hover:bg-slate-100">
-                    <User className="w-4 h-4 text-blue-600" />
+                  <div className="p-1 rounded-xl hover:bg-amber-50">
+                    <BellRing className="w-4 h-4 text-orange-500 animate-pulse" />
                   </div>
-                  <span className="text-[10px] text-blue-600 font-semibold">Ke Pegawai</span>
+                  <span className="text-[9px] sm:text-[10px] text-orange-600 font-bold">Alarm</span>
                 </button>
               </>
             )}
@@ -929,7 +1324,12 @@ export default function App() {
         employee={currentEmployee}
         schedule={schedule}
         branding={branding}
+        workLocations={workLocations}
         onSaveAttendance={handleSaveAttendance}
+        onOpenLeaveRequest={() => {
+          setAttendanceModalOpen(false);
+          setLeaveModalOpen(true);
+        }}
       />
 
       {/* 2. Leave / Permission Request Modal */}
@@ -1015,6 +1415,14 @@ export default function App() {
         attendanceRecords={attendanceRecords}
         branding={branding}
         onShowToast={(msg) => handleTriggerVoiceToast("Google Workspace", msg)}
+      />
+
+      {/* 11. Pimpinan GPS & Office Settings Modal */}
+      <PimpinanGpsModal
+        isOpen={pimpinanGpsModalOpen}
+        onClose={() => setPimpinanGpsModalOpen(false)}
+        schedule={schedule}
+        onSaveSchedule={handleSaveSchedule}
       />
     </div>
   );

@@ -164,6 +164,17 @@ export const LeaveRequestModal: React.FC<LeaveRequestModalProps> = ({
             </div>
           </div>
 
+          {/* Reassurance Notice: Bebas Radius GPS */}
+          <div className="p-2.5 rounded-2xl bg-emerald-50 border border-emerald-200/90 text-emerald-800 text-[11px] flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <div>
+              <span className="font-bold">Bebas Kriteria Radius GPS:</span>{" "}
+              <span className="text-emerald-700">
+                Pengajuan izin, sakit, cuti tahunan, dan dinas luar dapat diajukan dari lokasi mana pun tanpa pembatasan jarak GPS kantor.
+              </span>
+            </div>
+          </div>
+
           {errorMsg && (
             <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-[11px] flex items-center gap-1.5">
               <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />

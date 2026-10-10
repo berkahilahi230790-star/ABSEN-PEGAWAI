@@ -15,6 +15,7 @@ import {
   Bell,
   Sliders,
   Shield,
+  ShieldAlert,
   Layers,
   FileImage,
   X,
@@ -26,6 +27,11 @@ import {
   ExternalLink,
   LogOut,
   AlertCircle,
+  Database,
+  Cloud,
+  Link2,
+  FolderOpen,
+  FolderCheck,
 } from "lucide-react";
 import { BannerInfo, CompanyBranding, EmployeeProfile, WorkScheduleConfig, AttendanceRecord } from "../types";
 import { audioNotificationService } from "../services/audioNotification";
@@ -45,7 +51,18 @@ import {
   listDriveAttendanceFiles,
   DriveFileInfo,
   getOrCreateAttendanceSpreadsheet,
+  getStoredDriveFolderUrl,
+  setStoredDriveFolder,
+  getStoredDriveFolderId,
+  getStoredPhotoDriveFolderUrl,
+  setStoredPhotoDriveFolder,
+  getStoredPhotoDriveFolderId,
+  extractDriveFolderId,
 } from "../services/googleWorkspace";
+import {
+  saveDrivePhotoFolderToFirestore,
+  fetchDrivePhotoFolderFromFirestore,
+} from "../services/firebase";
 import { WorkspaceConfirmModal } from "./WorkspaceConfirmModal";
 import { User } from "firebase/auth";
 
@@ -58,6 +75,8 @@ interface AdminSettingsProps {
   onUpdateEmployeeQuota: (employeeId: string, newQuota: number) => void;
   initialSubTab?: "schedule" | "gps" | "leave" | "branding" | "google";
   attendanceRecords?: AttendanceRecord[];
+  onOpenTempatTugas?: () => void;
+  onOpenPegawai?: () => void;
 }
 
 export const AdminSettings: React.FC<AdminSettingsProps> = ({
@@ -69,6 +88,8 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   onUpdateEmployeeQuota,
   initialSubTab = "schedule",
   attendanceRecords = [],
+  onOpenTempatTugas,
+  onOpenPegawai,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<"schedule" | "gps" | "leave" | "branding" | "google">(initialSubTab);
 
@@ -82,6 +103,58 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   const [isLoadingDriveFiles, setIsLoadingDriveFiles] = useState(false);
   const [googleError, setGoogleError] = useState<string | null>(null);
   const [googleConfirmOpen, setGoogleConfirmOpen] = useState(false);
+  const [driveFolderInput, setDriveFolderInput] = useState<string>(getStoredDriveFolderUrl() || "");
+  const [driveFolderSaved, setDriveFolderSaved] = useState(false);
+
+  // Dedicated Photo Storage Folder State
+  const [photoDriveFolderInput, setPhotoDriveFolderInput] = useState<string>(
+    getStoredPhotoDriveFolderUrl() || ""
+  );
+  const [photoDriveFolderSaved, setPhotoDriveFolderSaved] = useState(false);
+  const [isSavingPhotoDriveFolder, setIsSavingPhotoDriveFolder] = useState(false);
+
+  // Fetch Firestore photo folder setting on mount
+  useEffect(() => {
+    fetchDrivePhotoFolderFromFirestore().then((res) => {
+      if (res && res.photoFolderUrl) {
+        setStoredPhotoDriveFolder(res.photoFolderUrl);
+        setPhotoDriveFolderInput((prev) => prev || res.photoFolderUrl);
+      }
+    });
+  }, []);
+
+  const handleSavePhotoDriveFolder = async () => {
+    setIsSavingPhotoDriveFolder(true);
+    try {
+      const trimmed = photoDriveFolderInput.trim();
+      const folderId = extractDriveFolderId(trimmed) || "";
+      setStoredPhotoDriveFolder(trimmed);
+      await saveDrivePhotoFolderToFirestore(trimmed, folderId);
+      setPhotoDriveFolderSaved(true);
+      setTimeout(() => setPhotoDriveFolderSaved(false), 3500);
+      showSuccess();
+    } catch (e) {
+      console.warn("Save photo folder error:", e);
+    } finally {
+      setIsSavingPhotoDriveFolder(false);
+    }
+  };
+
+  const handleClearPhotoDriveFolder = async () => {
+    setPhotoDriveFolderInput("");
+    setStoredPhotoDriveFolder("");
+    await saveDrivePhotoFolderToFirestore("", "");
+    setPhotoDriveFolderSaved(true);
+    setTimeout(() => setPhotoDriveFolderSaved(false), 2000);
+    showSuccess();
+  };
+
+  const handleSaveDriveFolder = () => {
+    setStoredDriveFolder(driveFolderInput);
+    setDriveFolderSaved(true);
+    setTimeout(() => setDriveFolderSaved(false), 3000);
+    showSuccess();
+  };
 
   useEffect(() => {
     const unsub = initAuth(
@@ -416,6 +489,51 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         </div>
       </div>
 
+      {/* Quick Navigation to Tempat Tugas & Pegawai */}
+      {(onOpenTempatTugas || onOpenPegawai) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {onOpenTempatTugas && (
+            <button
+              type="button"
+              id="admin-settings-go-tempat-tugas"
+              onClick={onOpenTempatTugas}
+              className="p-3 rounded-2xl bg-indigo-50/80 hover:bg-indigo-100 border border-indigo-200 text-left flex items-center justify-between gap-2 transition-all cursor-pointer group active:scale-98"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                  <MapPin className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-indigo-950">Halaman Tempat Tugas</h4>
+                  <p className="text-[10px] text-indigo-700">Input titik GPS & download data tempat</p>
+                </div>
+              </div>
+              <span className="text-indigo-600 text-xs font-bold">&rarr;</span>
+            </button>
+          )}
+
+          {onOpenPegawai && (
+            <button
+              type="button"
+              id="admin-settings-go-pegawai"
+              onClick={onOpenPegawai}
+              className="p-3 rounded-2xl bg-purple-50/80 hover:bg-purple-100 border border-purple-200 text-left flex items-center justify-between gap-2 transition-all cursor-pointer group active:scale-98"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                  <Users className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-purple-950">Halaman Pegawai</h4>
+                  <p className="text-[10px] text-purple-700">Identitas, jabatan & pilihan tempat tugas</p>
+                </div>
+              </div>
+              <span className="text-purple-600 text-xs font-bold">&rarr;</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Sub Tabs */}
       <div className="grid grid-cols-5 gap-1 bg-slate-200/70 p-1 rounded-2xl text-xs font-bold">
         <button
@@ -680,6 +798,17 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
               <span className="text-[11px] text-slate-500">
                 Pegawai wajib berada di dalam jarak ini saat absen
               </span>
+            </div>
+
+            <div className="mt-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] space-y-1">
+              <div className="flex items-center gap-1.5 font-bold">
+                <ShieldAlert className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                <span>Aturan Kebijakan Presensi & GPS:</span>
+              </div>
+              <p className="text-slate-600 leading-relaxed">
+                • <strong>Absen Masuk & Pulang:</strong> Diblokir total jika pegawai berada di luar radius lokasi kantor.<br />
+                • <strong>Pengajuan Izin / Cuti:</strong> Bebas diajukan dari mana saja tanpa syarat kriteria radius GPS.
+              </p>
             </div>
           </div>
 
@@ -1286,6 +1415,41 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
             </div>
           )}
 
+          {/* Cloud Storage Architecture Overview */}
+          <div className="bg-gradient-to-r from-blue-900 to-indigo-900 rounded-3xl p-5 text-white shadow-md">
+            <div className="flex items-center gap-2.5 mb-3">
+              <div className="w-9 h-9 rounded-xl bg-white/15 backdrop-blur-md flex items-center justify-center border border-white/20">
+                <Database className="w-5 h-5 text-blue-200" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold">Arsitektur Penyimpanan Hybrid PresensiGo</h3>
+                <p className="text-[11px] text-blue-200">Integrasi Google Drive & Cloud Firestore Aktif</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="bg-white/10 backdrop-blur-sm p-3 rounded-2xl border border-white/10 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-amber-300 text-[11px]">
+                  <HardDrive className="w-3.5 h-3.5" />
+                  <span>Google Drive (Berkas & Foto Wajah)</span>
+                </div>
+                <p className="text-[11px] text-blue-100 leading-relaxed">
+                  Foto selfie presensi dan berkas ekspor laporan otomatis diunggah ke Google Drive Anda. Menghemat kuota database hingga 99%.
+                </p>
+              </div>
+
+              <div className="bg-white/10 backdrop-blur-sm p-3 rounded-2xl border border-white/10 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-emerald-300 text-[11px]">
+                  <Cloud className="w-3.5 h-3.5" />
+                  <span>Cloud Firestore (Data GPS & Absensi)</span>
+                </div>
+                <p className="text-[11px] text-blue-100 leading-relaxed">
+                  Koordinat GPS, nama staf, waktu check-in, dan status verifikasi biometrik disimpan aman di Cloud Firestore secara real-time.
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* Account Status Card */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
             <div className="flex items-center justify-between">
@@ -1451,6 +1615,199 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                 <span>Buka Drive</span>
                 <ExternalLink className="w-3 h-3" />
               </a>
+            </div>
+
+            {/* Input Link Google Drive Khusus Tempat Penyimpanan Foto Absen */}
+            <div className="p-4 sm:p-5 bg-gradient-to-br from-blue-50/90 to-indigo-50/70 rounded-2xl border-2 border-blue-300/80 shadow-xs space-y-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-xs shrink-0">
+                    <Camera className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                      <span>Link Google Drive Tempat Penyimpanan Foto Absen</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Tentukan folder Google Drive khusus untuk menampung seluruh foto selfie / biometrik kehadiran pegawai
+                    </p>
+                  </div>
+                </div>
+
+                {photoDriveFolderInput.trim() ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 self-start sm:self-auto shrink-0">
+                    <FolderCheck className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Folder Foto Aktif</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-200/80 text-slate-700 self-start sm:self-auto shrink-0">
+                    <span>Default: My Drive Utama</span>
+                  </span>
+                )}
+              </div>
+
+              {/* Input Form with Link Icon */}
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-bold text-slate-700">
+                  Tautan (URL) Folder Google Drive untuk Foto Absensi:
+                </label>
+                <div className="relative flex items-center">
+                  <div className="absolute left-3 text-slate-400 pointer-events-none">
+                    <Link2 className="w-4 h-4 text-blue-500" />
+                  </div>
+                  <input
+                    type="url"
+                    id="input-drive-photo-folder"
+                    placeholder="Contoh: https://drive.google.com/drive/folders/1aBcDeFgHiJkLmNoPqRsTuVwXyZ..."
+                    value={photoDriveFolderInput}
+                    onChange={(e) => setPhotoDriveFolderInput(e.target.value)}
+                    className="w-full pl-9 pr-8 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-800 shadow-2xs"
+                  />
+                  {photoDriveFolderInput && (
+                    <button
+                      type="button"
+                      onClick={() => setPhotoDriveFolderInput("")}
+                      className="absolute right-2.5 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                      title="Hapus teks"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Validation helper */}
+                {photoDriveFolderInput.trim() && (
+                  <div className="text-[11px] text-blue-900 font-medium flex items-center gap-1.5 bg-blue-100/70 p-2 rounded-xl">
+                    <HardDrive className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                    <span>
+                      {extractDriveFolderId(photoDriveFolderInput)
+                        ? `ID Folder Terdeteksi: ${extractDriveFolderId(photoDriveFolderInput)} (Siap digunakan)`
+                        : "Pastikan URL adalah tautan folder Google Drive yang valid (mengandung /folders/...)"}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Actions Button */}
+              <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                <button
+                  type="button"
+                  id="btn-save-photo-drive-folder"
+                  onClick={handleSavePhotoDriveFolder}
+                  disabled={isSavingPhotoDriveFolder}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 active:scale-95"
+                >
+                  {isSavingPhotoDriveFolder ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Menyimpan ke Cloud...</span>
+                    </>
+                  ) : photoDriveFolderSaved ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-white" />
+                      <span>Link Tersimpan & Sinkron ke Firestore ✓</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Simpan Link Folder Foto</span>
+                    </>
+                  )}
+                </button>
+
+                {photoDriveFolderInput.trim() && (
+                  <>
+                    <a
+                      href={
+                        photoDriveFolderInput.startsWith("http")
+                          ? photoDriveFolderInput
+                          : `https://drive.google.com/drive/folders/${photoDriveFolderInput}`
+                      }
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3.5 py-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer active:scale-95"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Buka Folder Foto di Drive</span>
+                      <ExternalLink className="w-3 h-3 text-slate-400" />
+                    </a>
+
+                    <button
+                      type="button"
+                      onClick={handleClearPhotoDriveFolder}
+                      className="px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      Reset ke Default
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {/* Petunjuk Penggunaan */}
+              <div className="p-3 bg-white/80 rounded-xl border border-blue-100 text-[11px] text-slate-600 space-y-1">
+                <p className="font-bold text-slate-800">💡 Cara Menyalin Link Folder dari Google Drive:</p>
+                <ol className="list-decimal list-inside space-y-0.5 text-slate-600 ml-1">
+                  <li>
+                    Buka{" "}
+                    <a
+                      href="https://drive.google.com"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-600 underline font-medium"
+                    >
+                      Google Drive
+                    </a>{" "}
+                    di peramban Anda.
+                  </li>
+                  <li>Buat folder baru (contoh: <em>"Foto Absen PresensiGo 2026"</em>) atau pilih folder yang sudah ada.</li>
+                  <li>
+                    Klik kanan pada folder tersebut &rarr; pilih <strong>Bagikan (*Share*)</strong> atau <strong>Salin link (*Copy link*)</strong>.
+                  </li>
+                  <li>
+                    Tempelkan tautan di kolom input di atas, lalu klik <strong>Simpan Link Folder Foto</strong>.
+                  </li>
+                </ol>
+              </div>
+            </div>
+
+            {/* Folder Google Drive untuk Berkas Laporan Bulanan (Opsional) */}
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2.5">
+              <div>
+                <h4 className="text-xs font-bold text-slate-800">
+                  Folder Google Drive Arsip Laporan Bulanan (Opsional)
+                </h4>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Folder khusus untuk berkas ekspor laporan kehadiran (.xlsx & .pdf). Jika dikosongkan, laporan akan tersimpan di Google Drive Utama (<em>My Drive</em>).
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Misal: https://drive.google.com/drive/folders/1aBcDeFg... (atau biarkan kosong)"
+                  value={driveFolderInput}
+                  onChange={(e) => setDriveFolderInput(e.target.value)}
+                  className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveDriveFolder}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 cursor-pointer active:scale-95"
+                >
+                  {driveFolderSaved ? "Tersimpan ✓" : "Simpan Folder Laporan"}
+                </button>
+              </div>
+            </div>
+
+            {/* Account Security Guidance Card */}
+            <div className="p-3.5 bg-amber-50/70 border border-amber-200/80 rounded-2xl text-[11px] text-amber-900 space-y-1">
+              <p className="font-bold flex items-center gap-1.5 text-amber-800">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>Petunjuk Jika Muncul 'Bantuan Akun Google' / Checklist Pemulihan:</span>
+              </p>
+              <p className="text-amber-800/90 leading-relaxed">
+                Google terkadang menampilkan pengingat keamanan (seperti nomor telepon pemulihan) saat aplikasi meminta izin Google Drive. Anda cukup menutup notifikasi tersebut (klik tanda X) atau scroll ke bawah dan klik <strong>Lanjutkan / Izinkan</strong> agar berkas dapat diunggah ke Google Drive Anda.
+              </p>
             </div>
 
             {driveFiles.length > 0 ? (

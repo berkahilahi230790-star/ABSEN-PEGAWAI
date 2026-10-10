@@ -9,6 +9,7 @@ import {
   UserCheck,
   Shield,
   Clock,
+  Award,
 } from "lucide-react";
 import { CompanyBranding, EmployeeProfile, NotificationItem, UserRole } from "../types";
 import { getThemeClasses } from "../utils/theme";
@@ -62,7 +63,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 id="role-employee-btn"
                 onClick={() => onToggleRole("employee")}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all ${
+                className={`px-2 py-1 rounded-lg text-[10px] sm:text-[11px] font-bold flex items-center gap-1 transition-all ${
                   currentRole === "employee"
                     ? "bg-white text-blue-700 shadow-sm"
                     : "text-white/80 hover:text-white hover:bg-white/10"
@@ -73,11 +74,24 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span>Pegawai</span>
               </button>
               <button
+                id="role-pimpinan-btn"
+                onClick={() => onToggleRole("pimpinan")}
+                className={`px-2 py-1 rounded-lg text-[10px] sm:text-[11px] font-bold flex items-center gap-1 transition-all ${
+                  currentRole === "pimpinan"
+                    ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm font-extrabold"
+                    : "text-white/80 hover:text-white hover:bg-white/10"
+                }`}
+                title="Mode Tampilan Pimpinan (Direksi)"
+              >
+                <Award className="w-3 h-3 text-amber-300" />
+                <span>Pimpinan</span>
+              </button>
+              <button
                 id="role-manager-btn"
                 onClick={() => onToggleRole("manager")}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all ${
+                className={`px-2 py-1 rounded-lg text-[10px] sm:text-[11px] font-bold flex items-center gap-1 transition-all ${
                   currentRole === "manager"
-                    ? "bg-amber-400 text-slate-900 shadow-sm"
+                    ? "bg-amber-400 text-slate-900 shadow-sm font-extrabold"
                     : "text-white/80 hover:text-white hover:bg-white/10"
                 }`}
                 title="Mode Tampilan Admin Kepegawaian"
@@ -143,7 +157,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
             <span className="truncate">
-              {currentRole === "manager" ? "Dasbor Admin Kepegawaian" : `${employee.name} • ${employee.position}`}
+              {currentRole === "pimpinan"
+                ? `Mode Pimpinan • ${employee.name}`
+                : currentRole === "manager"
+                ? "Dasbor Admin Kepegawaian"
+                : `${employee.name} • ${employee.position}`}
             </span>
           </div>
         </div>

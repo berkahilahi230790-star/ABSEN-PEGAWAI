@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    // Attendance collection: stores GPS, employee name, dates, status, and Google Drive photo URLs
+    match /attendance/{attendanceId} {
+      allow read: if true;
+      allow create, update: if isValidId(attendanceId)
+        && request.resource.data.id is string
+        && request.resource.data.employeeId is string
+        && request.resource.data.employeeName is string
+        && request.resource.data.date is string
+        && request.resource.data.status in ['tepat_waktu', 'terlambat', 'izin', 'sakit', 'alpa'];
+      allow delete: if false;
+    }
+
+    // Employees collection
+    match /employees/{employeeId} {
+      allow read: if true;
+      allow create, update: if isValidId(employeeId)
+        && request.resource.data.name is string;
+      allow delete: if isValidId(employeeId);
+    }
+
+    // Leave requests
+    match /leaveRequests/{requestId} {
+      allow read: if true;
+      allow create, update: if isValidId(requestId)
+        && request.resource.data.employeeId is string;
+      allow delete: if false;
+    }
+
+    // Company settings
+    match /companySettings/{settingId} {
+      allow read: if true;
+      allow write: if isValidId(settingId);
+    }
+
+    // Work locations (Tempat Tugas & GPS)
+    match /workLocations/{locationId} {
+      allow read: if true;
+      allow create, update: if isValidId(locationId)
+        && request.resource.data.name is string;
+      allow delete: if isValidId(locationId);
+    }
+  }
+}

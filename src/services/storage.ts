@@ -7,16 +7,64 @@ import {
   ChatMessage,
   NotificationItem,
   Coordinates,
+  WorkLocation,
 } from "../types";
+
+export const DEFAULT_WORK_LOCATIONS: WorkLocation[] = [
+  {
+    id: "loc-001",
+    name: "Dinas Pendidikan Kabupaten/Kota (Kantor Induk)",
+    address: "Jl. Jend. Sudirman Kav. 52-53, Senayan, Jakarta Selatan",
+    latitude: -6.224168,
+    longitude: 106.809675,
+    radiusMeters: 200,
+    description: "Kantor Pusat Induk Administrasi & Koordinasi Dinas",
+    isMainOffice: true,
+    createdAt: "2026-01-01T08:00:00.000Z",
+  },
+  {
+    id: "loc-002",
+    name: "SMP Negeri 1 Percontohan",
+    address: "Jl. Gatot Subroto No. 45, Jakarta",
+    latitude: -6.230123,
+    longitude: 106.815432,
+    radiusMeters: 150,
+    description: "Unit Pelaksana Teknis Satuan Pendidikan Dasar Menengah",
+    createdAt: "2026-01-05T08:00:00.000Z",
+  },
+  {
+    id: "loc-003",
+    name: "SMA Negeri 2 Unggulan",
+    address: "Jl. M.H. Thamrin No. 88, Jakarta",
+    latitude: -6.195432,
+    longitude: 106.823456,
+    radiusMeters: 150,
+    description: "Satuan Pendidikan Menengah Atas",
+    createdAt: "2026-01-10T08:00:00.000Z",
+  },
+  {
+    id: "loc-004",
+    name: "Kantor Korwil Bidang Pendidikan Wilayah Barat",
+    address: "Jl. Daan Mogot No. 12, Jakarta Barat",
+    latitude: -6.172345,
+    longitude: 106.789123,
+    radiusMeters: 180,
+    description: "Kantor Pelayanan & Pengawasan Wilayah Barat",
+    createdAt: "2026-01-15T08:00:00.000Z",
+  },
+];
 
 // Default seed data
 export const DEFAULT_CURRENT_EMPLOYEE: EmployeeProfile = {
   id: "emp-001",
-  name: "Ahmad Pratama",
-  email: "ahmad.pratama@perusahaan.co.id",
+  name: "Ahmad Pratama, S.E.",
+  nip: "198709212010011005",
+  email: "ahmad.pratama@disdik.go.id",
   role: "employee",
-  position: "Senior Sales & Operations",
-  department: "Commercial & Business",
+  position: "Kasubag",
+  department: "Subbagian Umum & Kepegawaian",
+  workLocationId: "loc-001",
+  workLocationName: "Dinas Pendidikan Kabupaten/Kota (Kantor Induk)",
   avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80",
   annualLeaveQuota: 12,
   usedLeave: 3,
@@ -27,11 +75,14 @@ export const DEFAULT_EMPLOYEES: EmployeeProfile[] = [
   DEFAULT_CURRENT_EMPLOYEE,
   {
     id: "emp-002",
-    name: "Siti Nurhaliza",
-    email: "siti.nurhaliza@perusahaan.co.id",
+    name: "Dra. Hj. Siti Nurhaliza, M.Pd.",
+    nip: "198003182005012004",
+    email: "siti.nurhaliza@disdik.go.id",
     role: "employee",
-    position: "UI/UX Designer",
-    department: "Product & Tech",
+    position: "Kepala Sekolah",
+    department: "Satuan Pendidikan",
+    workLocationId: "loc-002",
+    workLocationName: "SMP Negeri 1 Percontohan",
     avatarUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&auto=format&fit=crop&q=80",
     annualLeaveQuota: 12,
     usedLeave: 2,
@@ -39,11 +90,14 @@ export const DEFAULT_EMPLOYEES: EmployeeProfile[] = [
   },
   {
     id: "emp-003",
-    name: "Budi Santoso",
-    email: "budi.santoso@perusahaan.co.id",
+    name: "Budi Santoso, S.Kom.",
+    nip: "198905142012021002",
+    email: "budi.santoso@disdik.go.id",
     role: "employee",
-    position: "Fullstack Engineer",
-    department: "Product & Tech",
+    position: "Kasi",
+    department: "Seksi Kurikulum & Penilaian",
+    workLocationId: "loc-001",
+    workLocationName: "Dinas Pendidikan Kabupaten/Kota (Kantor Induk)",
     avatarUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80",
     annualLeaveQuota: 12,
     usedLeave: 5,
@@ -51,15 +105,63 @@ export const DEFAULT_EMPLOYEES: EmployeeProfile[] = [
   },
   {
     id: "emp-004",
-    name: "Rina Wijayanti",
-    email: "rina.hr@perusahaan.co.id",
+    name: "Rina Wijayanti, S.Pd., M.M.",
+    nip: "198204152006042003",
+    email: "rina.hr@disdik.go.id",
     role: "manager",
-    position: "Admin Kepegawaian",
-    department: "Human Resources",
+    position: "Kabid",
+    department: "Bidang Pembinaan Ketenagaan",
+    workLocationId: "loc-001",
+    workLocationName: "Dinas Pendidikan Kabupaten/Kota (Kantor Induk)",
     avatarUrl: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&auto=format&fit=crop&q=80",
     annualLeaveQuota: 14,
     usedLeave: 1,
     phone: "+62 815-6677-8899",
+  },
+  {
+    id: "emp-005",
+    name: "Dr. Ir. Hendra Kusuma, M.M.",
+    nip: "197508121999031001",
+    email: "hendra.kusuma@disdik.go.id",
+    role: "pimpinan",
+    position: "Kadis",
+    department: "Pimpinan Dinas Pendidikan",
+    workLocationId: "loc-001",
+    workLocationName: "Dinas Pendidikan Kabupaten/Kota (Kantor Induk)",
+    avatarUrl: "https://images.unsplash.com/photo-1560250097-0b93528c311a?w=200&auto=format&fit=crop&q=80",
+    annualLeaveQuota: 20,
+    usedLeave: 2,
+    phone: "+62 811-9988-7766",
+  },
+  {
+    id: "emp-006",
+    name: "Dewi Lestari, S.Pd.",
+    nip: "199201102018012001",
+    email: "dewi.lestari@disdik.go.id",
+    role: "employee",
+    position: "Guru",
+    department: "Tenaga Pendidik",
+    workLocationId: "loc-002",
+    workLocationName: "SMP Negeri 1 Percontohan",
+    avatarUrl: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&auto=format&fit=crop&q=80",
+    annualLeaveQuota: 12,
+    usedLeave: 0,
+    phone: "+62 812-9900-1122",
+  },
+  {
+    id: "emp-007",
+    name: "Rian Hidayat, A.Md.",
+    nip: "199411032019031004",
+    email: "rian.hidayat@disdik.go.id",
+    role: "employee",
+    position: "Staf",
+    department: "Subbagian Tata Usaha",
+    workLocationId: "loc-001",
+    workLocationName: "Dinas Pendidikan Kabupaten/Kota (Kantor Induk)",
+    avatarUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80",
+    annualLeaveQuota: 12,
+    usedLeave: 1,
+    phone: "+62 813-7788-9900",
   },
 ];
 
@@ -305,6 +407,7 @@ const KEYS = {
   CHAT_MESSAGES: "presensigo_chat_messages",
   EMPLOYEES: "presensigo_employees",
   CURRENT_ROLE: "presensigo_current_role",
+  WORK_LOCATIONS: "presensigo_work_locations",
 };
 
 export function getStoredAttendance(): AttendanceRecord[] {
@@ -422,6 +525,25 @@ export function saveStoredEmployees(employees: EmployeeProfile[]): void {
   } catch (e) {}
 }
 
+export function getStoredWorkLocations(): WorkLocation[] {
+  try {
+    const raw = localStorage.getItem(KEYS.WORK_LOCATIONS);
+    if (!raw) {
+      localStorage.setItem(KEYS.WORK_LOCATIONS, JSON.stringify(DEFAULT_WORK_LOCATIONS));
+      return DEFAULT_WORK_LOCATIONS;
+    }
+    return JSON.parse(raw);
+  } catch (e) {
+    return DEFAULT_WORK_LOCATIONS;
+  }
+}
+
+export function saveStoredWorkLocations(locations: WorkLocation[]): void {
+  try {
+    localStorage.setItem(KEYS.WORK_LOCATIONS, JSON.stringify(locations));
+  } catch (e) {}
+}
+
 // Aliases for seamless imports
 export const getStoredAttendanceRecords = getStoredAttendance;
 export const getStoredSchedule = getStoredWorkSchedule;
@@ -431,6 +553,7 @@ export const saveBranding = saveStoredBranding;
 export const saveChatMessages = saveStoredChat;
 export const saveEmployees = saveStoredEmployees;
 export const saveLeaveRequests = saveStoredLeaveRequests;
+export const saveWorkLocations = saveStoredWorkLocations;
 
 export function saveAttendanceRecord(record: AttendanceRecord): void {
   const current = getStoredAttendance();

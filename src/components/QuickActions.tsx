@@ -12,6 +12,8 @@ import {
   ShieldAlert,
   UserCog,
   Palette,
+  Building,
+  Navigation,
 } from "lucide-react";
 import { AttendanceRecord, CompanyBranding, UserRole, WorkScheduleConfig } from "../types";
 import { getThemeClasses } from "../utils/theme";
@@ -34,6 +36,7 @@ interface QuickActionsProps {
   onOpenChangePassword?: () => void;
   onOpenUploadPhoto?: () => void;
   onOpenAccount?: () => void;
+  onOpenPimpinanGps?: () => void;
 }
 
 export const QuickActions: React.FC<QuickActionsProps> = ({
@@ -54,6 +57,7 @@ export const QuickActions: React.FC<QuickActionsProps> = ({
   onOpenChangePassword,
   onOpenUploadPhoto,
   onOpenAccount,
+  onOpenPimpinanGps,
 }) => {
   const theme = getThemeClasses(branding.themePreset);
 
@@ -244,7 +248,115 @@ export const QuickActions: React.FC<QuickActionsProps> = ({
     },
   ];
 
-  const actions = currentRole === "employee" ? employeeActions : managerActions;
+  // Actions specifically tailored for Pimpinan (Employee features + Laporan Presensi + Input Titik GPS & Nama Kantor)
+  const pimpinanActions = [
+    {
+      id: "action-pimpinan-absen-masuk",
+      title: "Absen Masuk",
+      desc: hasCheckedIn ? `Pukul ${todayAttendance?.checkInTime}` : "Verifikasi Wajah",
+      icon: Camera,
+      gradient: "from-purple-600 to-indigo-600",
+      badge: hasCheckedIn ? "Selesai" : "Wajib",
+      badgeColor: hasCheckedIn ? "bg-emerald-100 text-emerald-700" : "bg-purple-100 text-purple-700",
+      disabled: hasCheckedIn,
+      onClick: () => onOpenAttendance("in"),
+    },
+    {
+      id: "action-pimpinan-absen-pulang",
+      title: "Absen Pulang",
+      desc: hasCheckedOut
+        ? `Pukul ${todayAttendance?.checkOutTime}`
+        : hasCheckedIn
+        ? `Jadwal ${schedule.checkOutTime}`
+        : "Setelah absen masuk",
+      icon: LogOut,
+      gradient: "from-indigo-600 to-purple-600",
+      badge: hasCheckedOut ? "Selesai" : hasCheckedIn ? "Siap" : "Menunggu",
+      badgeColor: hasCheckedOut
+        ? "bg-slate-100 text-slate-600"
+        : hasCheckedIn
+        ? "bg-amber-100 text-amber-700"
+        : "bg-slate-100 text-slate-400",
+      disabled: !hasCheckedIn || hasCheckedOut,
+      onClick: () => onOpenAttendance("out"),
+    },
+    {
+      id: "action-pimpinan-laporan",
+      title: "Laporan Presensi",
+      desc: "Rekap Bulanan Semua Staf",
+      icon: BarChart3,
+      gradient: "from-blue-600 to-indigo-700",
+      badge: "Rekapitulasi",
+      badgeColor: "bg-blue-100 text-blue-800 font-bold",
+      onClick: onOpenReports,
+    },
+    {
+      id: "action-pimpinan-titik-gps",
+      title: "Input Titik GPS",
+      desc: `${schedule.officeCoordinates.latitude.toFixed(3)}, ${schedule.officeCoordinates.longitude.toFixed(3)}`,
+      icon: MapPin,
+      gradient: "from-purple-700 to-pink-600",
+      badge: "GPS Kantor",
+      badgeColor: "bg-purple-100 text-purple-800 font-bold",
+      onClick: () => {
+        if (onOpenPimpinanGps) onOpenPimpinanGps();
+      },
+    },
+    {
+      id: "action-pimpinan-nama-kantor",
+      title: "Nama Kantor",
+      desc: schedule.officeName,
+      icon: Building,
+      gradient: "from-indigo-700 to-blue-700",
+      badge: "Lokasi",
+      badgeColor: "bg-indigo-100 text-indigo-800 font-bold",
+      onClick: () => {
+        if (onOpenPimpinanGps) onOpenPimpinanGps();
+      },
+    },
+    {
+      id: "action-pimpinan-izin",
+      title: "Ajukan Cuti",
+      desc: "Formulir Cuti Pribadi",
+      icon: FileText,
+      gradient: "from-violet-600 to-purple-600",
+      badge: "Formulir",
+      badgeColor: "bg-violet-100 text-violet-700",
+      onClick: onOpenLeaveRequest,
+    },
+    {
+      id: "action-pimpinan-radar",
+      title: "Radius Kantor",
+      desc:
+        officeDistanceMeters !== null
+          ? `${officeDistanceMeters} m (${
+              officeDistanceMeters <= schedule.geofenceRadiusMeters ? "Di Area" : "Di Luar"
+            })`
+          : "Cek Posisi GPS",
+      icon: Navigation,
+      gradient: "from-cyan-600 to-blue-700",
+      badge: "Geofence",
+      badgeColor: "bg-cyan-100 text-cyan-700",
+      onClick: onOpenOfficeRadar,
+    },
+    {
+      id: "action-pimpinan-chat",
+      title: "Chat Admin",
+      desc: "Konsultasi HR Internal",
+      icon: MessageSquareText,
+      gradient: "from-blue-500 to-cyan-600",
+      badge: unreadChatCount > 0 ? `${unreadChatCount} Baru` : "Online",
+      badgeColor: unreadChatCount > 0 ? "bg-rose-500 text-white" : "bg-emerald-100 text-emerald-700",
+      onClick: onOpenChat,
+    },
+  ];
+
+  const actions =
+    currentRole === "pimpinan"
+      ? pimpinanActions
+      : currentRole === "employee"
+      ? employeeActions
+      : managerActions;
 
   return (
     <div className="mx-4 my-3">

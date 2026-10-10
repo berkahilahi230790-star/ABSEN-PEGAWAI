@@ -15,6 +15,8 @@ export const SCOPES = [
   "https://www.googleapis.com/auth/drive.file",
 ];
 
+const SESSION_TOKEN_KEY = "presensigo_google_access_token";
+
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
@@ -22,14 +24,18 @@ const provider = new GoogleAuthProvider();
 // Add required Workspace scopes
 SCOPES.forEach((scope) => provider.addScope(scope));
 provider.setCustomParameters({
-  prompt: "consent",
-  access_type: "offline",
+  prompt: "select_account",
 });
 
 // Flag to indicate if we are in the middle of a sign-in flow
 let isSigningIn = false;
-// In-memory access token cache (never stored in localStorage)
+
+// Access token cached in-memory and in sessionStorage for current tab session
 let cachedAccessToken: string | null = null;
+try {
+  cachedAccessToken = sessionStorage.getItem(SESSION_TOKEN_KEY);
+} catch {}
+
 let currentGoogleUser: User | null = null;
 
 // Initialize auth state listener. Call this on app load.
@@ -40,14 +46,21 @@ export const initAuth = (
   return onAuthStateChanged(auth, async (user: User | null) => {
     currentGoogleUser = user;
     if (user) {
+      if (!cachedAccessToken) {
+        try {
+          cachedAccessToken = sessionStorage.getItem(SESSION_TOKEN_KEY);
+        } catch {}
+      }
       if (cachedAccessToken) {
         if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
       } else if (!isSigningIn) {
-        cachedAccessToken = null;
         if (onAuthFailure) onAuthFailure();
       }
     } else {
       cachedAccessToken = null;
+      try {
+        sessionStorage.removeItem(SESSION_TOKEN_KEY);
+      } catch {}
       currentGoogleUser = null;
       if (onAuthFailure) onAuthFailure();
     }
@@ -65,10 +78,18 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     }
 
     cachedAccessToken = credential.accessToken;
+    try {
+      sessionStorage.setItem(SESSION_TOKEN_KEY, credential.accessToken);
+    } catch {}
     currentGoogleUser = result.user;
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error("Sign in error:", error);
+    if (error?.code === "auth/popup-closed-by-user") {
+      throw new Error(
+        "Jendela login Google ditutup. Jika muncul checklist keamanan di jendela Google, Anda dapat klik tanda (X) atau klik 'Lanjutkan' untuk memberikan izin akses Google Drive."
+      );
+    }
     throw error;
   } finally {
     isSigningIn = false;
@@ -76,6 +97,11 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 };
 
 export const getAccessToken = async (): Promise<string | null> => {
+  if (!cachedAccessToken) {
+    try {
+      cachedAccessToken = sessionStorage.getItem(SESSION_TOKEN_KEY);
+    } catch {}
+  }
   return cachedAccessToken;
 };
 
@@ -86,5 +112,8 @@ export const getCurrentGoogleUser = (): User | null => {
 export const logoutGoogle = async () => {
   await signOut(auth);
   cachedAccessToken = null;
+  try {
+    sessionStorage.removeItem(SESSION_TOKEN_KEY);
+  } catch {}
   currentGoogleUser = null;
 };
