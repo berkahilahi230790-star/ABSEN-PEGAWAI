@@ -33,9 +33,12 @@ import { AttendanceRecord, CompanyBranding, EmployeeProfile } from "../types";
 import {
   syncAllAttendanceRecords,
   uploadFileToGoogleDrive,
+  uploadAttendancePhotoToGoogleDrive,
   getStoredSpreadsheetUrl,
 } from "../services/googleWorkspace";
 import { getAccessToken, googleSignIn } from "../services/googleAuth";
+import { saveAttendanceToFirestore } from "../services/firebase";
+import { saveAttendanceRecord } from "../services/storage";
 import { WorkspaceConfirmModal } from "./WorkspaceConfirmModal";
 
 interface MonthlyReportViewProps {
@@ -81,6 +84,47 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
   const showNotification = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  const [isUploadingPhotoToDrive, setIsUploadingPhotoToDrive] = useState(false);
+
+  const handleUploadSinglePhotoToDrive = async (rec: AttendanceRecord) => {
+    if (!rec.facePhotoUrl) return;
+    setIsUploadingPhotoToDrive(true);
+    try {
+      let token = await getAccessToken();
+      if (!token) {
+        const authRes = await googleSignIn();
+        token = authRes?.accessToken || null;
+      }
+      if (!token) {
+        showNotification("Gagal menghubungkan akun Google Workspace.");
+        return;
+      }
+      const driveRes = await uploadAttendancePhotoToGoogleDrive(
+        rec.facePhotoUrl,
+        rec.employeeName,
+        rec.date,
+        rec.checkInTime || rec.checkOutTime || "08-00-00"
+      );
+      if (driveRes) {
+        const updated: AttendanceRecord = {
+          ...rec,
+          facePhotoDriveUrl: driveRes.webViewLink,
+          facePhotoDriveFileId: driveRes.fileId,
+        };
+        await saveAttendanceToFirestore(updated);
+        saveAttendanceRecord(updated);
+        setSelectedRecordForPreview(updated);
+        showNotification("✓ Foto kehadiran berhasil dikirim ke Google Drive!");
+      } else {
+        showNotification("Gagal mengunggah foto ke folder Google Drive. Pastikan izin akses folder aktif.");
+      }
+    } catch (e: any) {
+      showNotification(`Gagal: ${e?.message || "Terjadi kesalahan saat unggah"}`);
+    } finally {
+      setIsUploadingPhotoToDrive(false);
+    }
   };
 
   // Helper to build Excel Workbook
@@ -795,6 +839,28 @@ export const MonthlyReportView: React.FC<MonthlyReportViewProps> = ({
             </div>
 
             <div className="flex items-center justify-end gap-2">
+              {!selectedRecordForPreview?.facePhotoDriveUrl &&
+                selectedRecordForPreview?.facePhotoUrl && (
+                  <button
+                    onClick={() => handleUploadSinglePhotoToDrive(selectedRecordForPreview)}
+                    disabled={isUploadingPhotoToDrive}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all disabled:opacity-50"
+                    title="Kirim foto presensi ini ke folder Google Drive"
+                  >
+                    {isUploadingPhotoToDrive ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Mengunggah...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Cloud className="w-3.5 h-3.5" />
+                        <span>Kirim ke Google Drive</span>
+                      </>
+                    )}
+                  </button>
+                )}
+
               {selectedRecordForPreview?.facePhotoDriveUrl && (
                 <a
                   href={selectedRecordForPreview.facePhotoDriveUrl}

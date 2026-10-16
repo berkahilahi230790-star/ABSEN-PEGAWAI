@@ -28,8 +28,15 @@ export interface DriveFileInfo {
 export function extractDriveFolderId(input: string): string | null {
   if (!input) return null;
   const trimmed = input.trim();
+  // Standard format: drive.google.com/drive/folders/ID or /drive/u/0/folders/ID
   const match = trimmed.match(/folders\/([a-zA-Z0-9_-]+)/);
   if (match) return match[1];
+  // Format with id query param: drive.google.com/open?id=ID or ?id=ID
+  const idMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (idMatch) return idMatch[1];
+  // Raw folder ID check (typically 15-45 characters alphanumeric with dashes and underscores)
+  const cleanId = trimmed.split(/[?#/]/).filter(Boolean).pop();
+  if (cleanId && /^[a-zA-Z0-9_-]{15,}$/.test(cleanId)) return cleanId;
   if (/^[a-zA-Z0-9_-]{15,}$/.test(trimmed)) return trimmed;
   return null;
 }
@@ -604,7 +611,8 @@ export async function uploadAttendancePhotoToGoogleDrive(
 
     let res = await doUpload(Boolean(folderId));
     if (!res.ok && folderId) {
-      console.warn("Photo upload to specific folder failed, retrying to root Drive...");
+      const folderErr = await res.text();
+      console.warn(`Unggah ke folder (${folderId}) gagal (${res.status}: ${folderErr}), mencoba unggah ke My Drive root...`);
       res = await doUpload(false);
     }
 
@@ -622,6 +630,65 @@ export async function uploadAttendancePhotoToGoogleDrive(
   } catch (err) {
     console.warn("Exception during photo upload to Google Drive:", err);
     return null;
+  }
+}
+
+/**
+ * Verify whether the currently connected Google account can access and write to the specified Drive folder
+ */
+export async function verifyDriveFolderAccess(
+  folderIdOrUrl: string
+): Promise<{ success: boolean; folderName?: string; error?: string }> {
+  const token = await getAccessToken();
+  if (!token) {
+    return {
+      success: false,
+      error: "Akun Google Workspace belum terhubung. Silakan klik tombol 'Hubungkan Akun Google' terlebih dahulu.",
+    };
+  }
+  const folderId = extractDriveFolderId(folderIdOrUrl);
+  if (!folderId) {
+    return {
+      success: false,
+      error: "Tautan atau ID folder Google Drive tidak valid.",
+    };
+  }
+
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${folderId}?fields=id,name,mimeType,capabilities,trashed`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+    if (!res.ok) {
+      if (res.status === 404) {
+        return {
+          success: false,
+          error:
+            "Folder tidak ditemukan di Google Drive atau akun yang sedang login belum diberi izin akses ke folder ini.",
+        };
+      }
+      if (res.status === 403) {
+        return {
+          success: false,
+          error:
+            "Izin akses folder ditolak oleh Google. Pastikan folder dibagikan dengan hak 'Editor' ke akun Google yang terhubung.",
+        };
+      }
+      const errText = await res.text();
+      return { success: false, error: `Gagal mengakses folder (${res.status}): ${errText}` };
+    }
+    const data = await res.json();
+    if (data.trashed) {
+      return { success: false, error: "Folder ini berada di dalam Sampah (Trash) Google Drive." };
+    }
+    if (data.mimeType !== "application/vnd.google-apps.folder") {
+      return { success: false, error: "Tautan yang dimasukkan mengarah ke berkas, bukan folder Google Drive." };
+    }
+    return { success: true, folderName: data.name };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Gagal memverifikasi folder." };
   }
 }
 

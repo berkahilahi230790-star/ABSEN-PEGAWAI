@@ -32,6 +32,8 @@ import {
   Link2,
   FolderOpen,
   FolderCheck,
+  ShieldCheck,
+  AlertTriangle,
 } from "lucide-react";
 import { BannerInfo, CompanyBranding, EmployeeProfile, WorkScheduleConfig, AttendanceRecord } from "../types";
 import { audioNotificationService } from "../services/audioNotification";
@@ -58,6 +60,7 @@ import {
   setStoredPhotoDriveFolder,
   getStoredPhotoDriveFolderId,
   extractDriveFolderId,
+  verifyDriveFolderAccess,
 } from "../services/googleWorkspace";
 import {
   saveDrivePhotoFolderToFirestore,
@@ -140,7 +143,33 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     }
   };
 
+  const [isTestingFolder, setIsTestingFolder] = useState(false);
+  const [folderTestResult, setFolderTestResult] = useState<{
+    success: boolean;
+    folderName?: string;
+    error?: string;
+  } | null>(null);
+
+  const handleTestPhotoFolder = async () => {
+    const trimmed = photoDriveFolderInput.trim();
+    if (!trimmed) return;
+    setIsTestingFolder(true);
+    setFolderTestResult(null);
+    try {
+      const res = await verifyDriveFolderAccess(trimmed);
+      setFolderTestResult(res);
+    } catch (e: any) {
+      setFolderTestResult({
+        success: false,
+        error: e?.message || "Gagal menguji akses folder",
+      });
+    } finally {
+      setIsTestingFolder(false);
+    }
+  };
+
   const handleClearPhotoDriveFolder = async () => {
+    setFolderTestResult(null);
     setPhotoDriveFolderInput("");
     setStoredPhotoDriveFolder("");
     await saveDrivePhotoFolderToFirestore("", "");
@@ -1717,6 +1746,26 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
 
                 {photoDriveFolderInput.trim() && (
                   <>
+                    <button
+                      type="button"
+                      onClick={handleTestPhotoFolder}
+                      disabled={isTestingFolder}
+                      className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer active:scale-95 disabled:opacity-50"
+                      title="Uji apakah folder ini dapat diakses oleh akun Google yang terhubung"
+                    >
+                      {isTestingFolder ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                          <span>Menguji Akses Folder...</span>
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>Tes Izin Akses Folder</span>
+                        </>
+                      )}
+                    </button>
+
                     <a
                       href={
                         photoDriveFolderInput.startsWith("http")
@@ -1728,7 +1777,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                       className="px-3.5 py-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer active:scale-95"
                     >
                       <FolderOpen className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Buka Folder Foto di Drive</span>
+                      <span>Buka Folder di Drive</span>
                       <ExternalLink className="w-3 h-3 text-slate-400" />
                     </a>
 
@@ -1742,6 +1791,40 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
                   </>
                 )}
               </div>
+
+              {/* Folder Test Feedback Result */}
+              {folderTestResult && (
+                <div
+                  className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
+                    folderTestResult.success
+                      ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                      : "bg-rose-50 border-rose-200 text-rose-800"
+                  }`}
+                >
+                  {folderTestResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  )}
+                  <div className="flex-1 text-[11px] leading-relaxed">
+                    {folderTestResult.success ? (
+                      <div>
+                        <p className="font-bold text-emerald-900">
+                          ✓ Berhasil Terhubung ke Folder: &quot;{folderTestResult.folderName}&quot;
+                        </p>
+                        <p className="text-emerald-700 mt-0.5">
+                          Akun Google Anda memiliki izin penuh untuk mengunggah dan menyimpan foto presensi ke folder ini.
+                        </p>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="font-bold text-rose-900">Perhatian: Folder Belum Dapat Diakses</p>
+                        <p className="text-rose-700 mt-0.5">{folderTestResult.error}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Petunjuk Penggunaan */}
               <div className="p-3 bg-white/80 rounded-xl border border-blue-100 text-[11px] text-slate-600 space-y-1">

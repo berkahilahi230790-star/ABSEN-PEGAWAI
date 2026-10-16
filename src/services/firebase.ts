@@ -20,7 +20,11 @@ import { AttendanceRecord, EmployeeProfile, LeaveRequest, WorkScheduleConfig, Wo
 
 // 1. Initialize Firebase App and Firestore
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = getFirestore(
+  app,
+  (firebaseConfig as any).firestoreDatabaseId ||
+    "ai-studio-presensigopegawa-bca7c9b3-5145-4367-926b-4ad0f1b946cb"
+);
 export const auth = getAuth(app);
 
 // 2. Structured Error Handling as mandated by Firebase Integration Skill
