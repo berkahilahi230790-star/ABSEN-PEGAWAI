@@ -24,6 +24,8 @@ import {
   Eye,
   ArrowLeft,
   Plus,
+  Camera,
+  UploadCloud,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { EmployeeProfile, WorkLocation, JABATAN_OPTIONS, UserRole } from "../types";
@@ -37,15 +39,7 @@ interface PegawaiViewProps {
   onOpenTempatTugas?: () => void;
 }
 
-const PRESET_AVATARS = [
-  "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1560250097-0b93528c311a?w=200&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80",
-];
+const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80";
 
 export const PegawaiView: React.FC<PegawaiViewProps> = ({
   employees,
@@ -72,7 +66,9 @@ export const PegawaiView: React.FC<PegawaiViewProps> = ({
   const [role, setRole] = useState<UserRole>("employee");
   const [department, setDepartment] = useState("");
   const [annualLeaveQuota, setAnnualLeaveQuota] = useState(12);
-  const [avatarUrl, setAvatarUrl] = useState(PRESET_AVATARS[0]);
+  const [avatarUrl, setAvatarUrl] = useState<string>(DEFAULT_AVATAR);
+  const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -80,6 +76,55 @@ export const PegawaiView: React.FC<PegawaiViewProps> = ({
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const handlePhotoUpload = (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      alert("Harap pilih berkas foto gambar (JPG, PNG, atau WebP).");
+      return;
+    }
+
+    setIsProcessingPhoto(true);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX_SIZE = 400;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_SIZE) {
+            height = Math.round((height * MAX_SIZE) / width);
+            width = MAX_SIZE;
+          }
+        } else {
+          if (height > MAX_SIZE) {
+            width = Math.round((width * MAX_SIZE) / height);
+            height = MAX_SIZE;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL("image/jpeg", 0.85);
+          setAvatarUrl(compressed);
+        } else {
+          setAvatarUrl(e.target?.result as string);
+        }
+        setIsProcessingPhoto(false);
+      };
+      img.onerror = () => {
+        setIsProcessingPhoto(false);
+        alert("Gagal membaca berkas gambar.");
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
   };
 
   // Open modal to add employee
@@ -95,7 +140,7 @@ export const PegawaiView: React.FC<PegawaiViewProps> = ({
     setRole("employee");
     setDepartment("Tenaga Pendidik");
     setAnnualLeaveQuota(12);
-    setAvatarUrl(PRESET_AVATARS[Math.floor(Math.random() * PRESET_AVATARS.length)]);
+    setAvatarUrl(DEFAULT_AVATAR);
     setFormError(null);
     setModalOpen(true);
   };
@@ -115,7 +160,7 @@ export const PegawaiView: React.FC<PegawaiViewProps> = ({
     setRole(emp.role);
     setDepartment(emp.department);
     setAnnualLeaveQuota(emp.annualLeaveQuota || 12);
-    setAvatarUrl(emp.avatarUrl || PRESET_AVATARS[0]);
+    setAvatarUrl(emp.avatarUrl || DEFAULT_AVATAR);
     setFormError(null);
     setModalOpen(true);
   };
@@ -790,65 +835,66 @@ export const PegawaiView: React.FC<PegawaiViewProps> = ({
                 </div>
               </div>
 
-              {/* Role Akun */}
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                  Hak Akses Aplikasi (Role):
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRole("employee")}
-                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                      role === "employee"
-                        ? "bg-blue-600 text-white border-blue-700 shadow-xs"
-                        : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-                    }`}
-                  >
-                    Pegawai
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRole("pimpinan")}
-                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                      role === "pimpinan"
-                        ? "bg-purple-600 text-white border-purple-700 shadow-xs"
-                        : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-                    }`}
-                  >
-                    Pimpinan
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRole("manager")}
-                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                      role === "manager"
-                        ? "bg-amber-500 text-white border-amber-600 shadow-xs"
-                        : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-                    }`}
-                  >
-                    Admin Kepegawaian
-                  </button>
+              {/* Foto Profil Pegawai */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-[11px] font-extrabold text-slate-800 flex items-center gap-1.5">
+                    <Camera className="w-4 h-4 text-blue-600" />
+                    <span>Foto Profil Pegawai:</span>
+                  </label>
+                  {avatarUrl && (
+                    <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md font-bold flex items-center gap-1 border border-emerald-200">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                      Foto Terpasang
+                    </span>
+                  )}
                 </div>
-              </div>
 
-              {/* Pilihan Foto Profil */}
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1.5">
-                  Foto Profil Pegawai:
-                </label>
-                <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                  {PRESET_AVATARS.map((av, i) => (
-                    <img
-                      key={i}
-                      src={av}
-                      alt="avatar"
-                      onClick={() => setAvatarUrl(av)}
-                      className={`w-11 h-11 rounded-2xl object-cover cursor-pointer border-2 transition-all shrink-0 ${
-                        avatarUrl === av ? "border-blue-600 scale-105 shadow-md" : "border-slate-200 opacity-70 hover:opacity-100"
-                      }`}
+                <div className="flex items-center gap-4 pt-0.5">
+                  {/* Preview avatar */}
+                  <div className="relative shrink-0">
+                    <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-slate-300 shadow-xs bg-slate-200 flex items-center justify-center">
+                      {avatarUrl ? (
+                        <img
+                          src={avatarUrl}
+                          alt="Foto Pegawai"
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <User className="w-8 h-8 text-slate-400" />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Upload button and info */}
+                  <div className="flex-1 space-y-1.5">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          handlePhotoUpload(e.target.files[0]);
+                        }
+                      }}
                     />
-                  ))}
+
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isProcessingPhoto}
+                      className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+                    >
+                      <UploadCloud className="w-4 h-4" />
+                      <span>{isProcessingPhoto ? "Memproses Foto..." : "Upload Foto Pegawai"}</span>
+                    </button>
+
+                    <p className="text-[10px] text-slate-500">
+                      Pilih foto wajah resmi pegawai dari komputer atau galeri HP (JPG, PNG, WebP).
+                    </p>
+                  </div>
                 </div>
               </div>
 

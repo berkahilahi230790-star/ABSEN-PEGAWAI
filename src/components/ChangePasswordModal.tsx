@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { EmployeeProfile } from "../types";
 import { audioNotificationService } from "../services/audioNotification";
+import { getEmployeePassword, setEmployeePassword } from "../services/authService";
 
 interface ChangePasswordModalProps {
   isOpen: boolean;
@@ -63,6 +64,13 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
       return;
     }
 
+    const expectedCurrent = getEmployeePassword(employee.id);
+    if (currentPassword !== expectedCurrent) {
+      setErrorMsg("Kata sandi saat ini tidak cocok. Kata sandi default adalah 123456.");
+      audioNotificationService.playChime("warning");
+      return;
+    }
+
     if (newPassword.length < 6) {
       setErrorMsg("Kata sandi baru minimal harus terdiri dari 6 karakter.");
       audioNotificationService.playChime("warning");
@@ -84,7 +92,8 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
     setIsSubmitting(true);
 
     setTimeout(() => {
-      // Save password update indicator to localStorage for this employee
+      // Save password to authService
+      setEmployeePassword(employee.id, newPassword);
       try {
         localStorage.setItem(`presensigo_pwd_updated_${employee.id}`, new Date().toISOString());
       } catch (err) {}

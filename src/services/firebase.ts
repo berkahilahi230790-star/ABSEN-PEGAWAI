@@ -16,7 +16,7 @@ import {
   Unsubscribe,
 } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
-import { AttendanceRecord, EmployeeProfile, LeaveRequest, WorkScheduleConfig, WorkLocation } from "../types";
+import { AttendanceRecord, CompanyBranding, EmployeeProfile, LeaveRequest, WorkScheduleConfig, WorkLocation } from "../types";
 
 // 1. Initialize Firebase App and Firestore
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -78,6 +78,31 @@ export function handleFirestoreError(
   };
   console.error("Firestore Error:", JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
+}
+
+/**
+ * Strips all `undefined` values recursively so Firestore setDoc / updateDoc never fails.
+ * Firestore throws: "Unsupported field value: undefined" if any property is undefined.
+ */
+export function cleanFirestoreData<T>(obj: T): T {
+  if (obj === null || obj === undefined) {
+    return null as unknown as T;
+  }
+  if (Array.isArray(obj)) {
+    return obj
+      .filter((item) => item !== undefined)
+      .map((item) => cleanFirestoreData(item)) as unknown as T;
+  }
+  if (typeof obj === "object" && !(obj instanceof Date)) {
+    const res: Record<string, any> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (value !== undefined) {
+        res[key] = cleanFirestoreData(value);
+      }
+    }
+    return res as T;
+  }
+  return obj;
 }
 
 // 3. Test Connection
@@ -230,7 +255,11 @@ export function subscribeToAttendance(
 export async function syncEmployeesToFirestore(employees: EmployeeProfile[]): Promise<void> {
   for (const emp of employees) {
     try {
-      await setDoc(doc(db, "employees", emp.id), emp, { merge: true });
+      const dataToSave = cleanFirestoreData({
+        ...emp,
+        updatedAt: new Date().toISOString(),
+      });
+      await setDoc(doc(db, "employees", emp.id), dataToSave, { merge: true });
     } catch (e) {
       console.warn(`Failed to sync employee ${emp.id} to Firestore:`, e);
     }
@@ -241,7 +270,8 @@ export async function syncEmployeesToFirestore(employees: EmployeeProfile[]): Pr
 export async function saveLeaveRequestToFirestore(request: LeaveRequest): Promise<void> {
   const path = `leaveRequests/${request.id}`;
   try {
-    await setDoc(doc(db, "leaveRequests", request.id), request, { merge: true });
+    const dataToSave = cleanFirestoreData(request);
+    await setDoc(doc(db, "leaveRequests", request.id), dataToSave, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -251,35 +281,46 @@ export async function saveLeaveRequestToFirestore(request: LeaveRequest): Promis
 export async function saveScheduleToFirestore(schedule: WorkScheduleConfig): Promise<void> {
   const path = "companySettings/schedule";
   try {
-    await setDoc(
-      doc(db, "companySettings", "schedule"),
-      {
-        ...schedule,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    const dataToSave = cleanFirestoreData({
+      ...schedule,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, "companySettings", "schedule"), dataToSave, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 
-// 10. Save and Fetch Google Drive Photo Folder Configuration in Firestore
+// 10. Save and Fetch Google Drive Photo Folder & Spreadsheet Configuration in Firestore
 export async function saveDrivePhotoFolderToFirestore(
   folderUrl: string,
   folderId: string
 ): Promise<void> {
   const path = "companySettings/driveConfig";
   try {
-    await setDoc(
-      doc(db, "companySettings", "driveConfig"),
-      {
-        photoFolderUrl: folderUrl,
-        photoFolderId: folderId,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    const dataToSave = cleanFirestoreData({
+      photoFolderUrl: folderUrl,
+      photoFolderId: folderId,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, "companySettings", "driveConfig"), dataToSave, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function saveSpreadsheetConfigToFirestore(
+  spreadsheetUrl: string,
+  spreadsheetId: string
+): Promise<void> {
+  const path = "companySettings/driveConfig";
+  try {
+    const dataToSave = cleanFirestoreData({
+      spreadsheetUrl,
+      spreadsheetId,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, "companySettings", "driveConfig"), dataToSave, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -288,6 +329,8 @@ export async function saveDrivePhotoFolderToFirestore(
 export async function fetchDrivePhotoFolderFromFirestore(): Promise<{
   photoFolderUrl: string;
   photoFolderId: string;
+  spreadsheetUrl?: string;
+  spreadsheetId?: string;
 } | null> {
   const path = "companySettings/driveConfig";
   try {
@@ -297,6 +340,8 @@ export async function fetchDrivePhotoFolderFromFirestore(): Promise<{
       return {
         photoFolderUrl: data.photoFolderUrl || "",
         photoFolderId: data.photoFolderId || "",
+        spreadsheetUrl: data.spreadsheetUrl || "",
+        spreadsheetId: data.spreadsheetId || "",
       };
     }
     return null;
@@ -309,7 +354,12 @@ export async function fetchDrivePhotoFolderFromFirestore(): Promise<{
 export async function saveWorkLocationToFirestore(location: WorkLocation): Promise<void> {
   const path = `workLocations/${location.id}`;
   try {
-    await setDoc(doc(db, "workLocations", location.id), location, { merge: true });
+    const dataToSave = cleanFirestoreData({
+      ...location,
+      createdAt: location.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, "workLocations", location.id), dataToSave, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -327,7 +377,12 @@ export async function deleteWorkLocationFromFirestore(locationId: string): Promi
 export async function syncWorkLocationsToFirestore(locations: WorkLocation[]): Promise<void> {
   for (const loc of locations) {
     try {
-      await setDoc(doc(db, "workLocations", loc.id), loc, { merge: true });
+      const dataToSave = cleanFirestoreData({
+        ...loc,
+        createdAt: loc.createdAt || new Date().toISOString(),
+        updatedAt: loc.updatedAt || new Date().toISOString(),
+      });
+      await setDoc(doc(db, "workLocations", loc.id), dataToSave, { merge: true });
     } catch (e) {
       console.warn(`Failed to sync work location ${loc.id} to Firestore:`, e);
     }
@@ -348,5 +403,123 @@ export async function fetchWorkLocationsFromFirestore(): Promise<WorkLocation[]>
     return [];
   }
 }
+
+export function subscribeToWorkLocations(
+  onUpdate: (locations: WorkLocation[]) => void,
+  onError?: (err: unknown) => void
+): Unsubscribe {
+  return onSnapshot(
+    collection(db, "workLocations"),
+    (snapshot) => {
+      const locations: WorkLocation[] = [];
+      snapshot.forEach((d) => {
+        locations.push(d.data() as WorkLocation);
+      });
+      if (locations.length > 0) {
+        onUpdate(locations);
+      }
+    },
+    (error) => {
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.LIST, "workLocations");
+    }
+  );
+}
+
+// 12. Company Branding Firestore Persistence & Realtime Listener
+export async function saveBrandingToFirestore(branding: CompanyBranding): Promise<void> {
+  const path = "companySettings/branding";
+  try {
+    const dataToSave = cleanFirestoreData({
+      ...branding,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, "companySettings", "branding"), dataToSave, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function fetchBrandingFromFirestore(): Promise<CompanyBranding | null> {
+  const path = "companySettings/branding";
+  try {
+    const docSnap = await getDoc(doc(db, "companySettings", "branding"));
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      return {
+        companyName: data.companyName || "PresensiGo",
+        tagline: data.tagline || "",
+        logoUrl: data.logoUrl || "",
+        themePreset: data.themePreset || "blue-gradient",
+        customPrimaryColor: data.customPrimaryColor || undefined,
+        banners: Array.isArray(data.banners) ? data.banners : [],
+      };
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+    return null;
+  }
+}
+
+export function subscribeToBranding(
+  onUpdate: (branding: CompanyBranding) => void,
+  onError?: (err: unknown) => void
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, "companySettings", "branding"),
+    (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        onUpdate({
+          companyName: data.companyName || "PresensiGo",
+          tagline: data.tagline || "",
+          logoUrl: data.logoUrl || "",
+          themePreset: data.themePreset || "blue-gradient",
+          customPrimaryColor: data.customPrimaryColor || undefined,
+          banners: Array.isArray(data.banners) ? data.banners : [],
+        });
+      }
+    },
+    (error) => {
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.GET, "companySettings/branding");
+    }
+  );
+}
+
+// 13. Company Schedule Firestore Fetcher & Realtime Listener
+export async function fetchScheduleFromFirestore(): Promise<WorkScheduleConfig | null> {
+  const path = "companySettings/schedule";
+  try {
+    const docSnap = await getDoc(doc(db, "companySettings", "schedule"));
+    if (docSnap.exists()) {
+      return docSnap.data() as WorkScheduleConfig;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+    return null;
+  }
+}
+
+export function subscribeToSchedule(
+  onUpdate: (schedule: WorkScheduleConfig) => void,
+  onError?: (err: unknown) => void
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, "companySettings", "schedule"),
+    (snapshot) => {
+      if (snapshot.exists()) {
+        onUpdate(snapshot.data() as WorkScheduleConfig);
+      }
+    },
+    (error) => {
+      if (onError) onError(error);
+      handleFirestoreError(error, OperationType.GET, "companySettings/schedule");
+    }
+  );
+}
+
 
 

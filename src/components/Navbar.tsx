@@ -10,6 +10,7 @@ import {
   Shield,
   Clock,
   Award,
+  LogOut,
 } from "lucide-react";
 import { CompanyBranding, EmployeeProfile, NotificationItem, UserRole } from "../types";
 import { getThemeClasses } from "../utils/theme";
@@ -27,6 +28,7 @@ interface NavbarProps {
   onToggleMobileFrame: () => void;
   onOpenProfile: () => void;
   onTriggerVoiceWarning: () => void;
+  onLogout?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -42,6 +44,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onToggleMobileFrame,
   onOpenProfile,
   onTriggerVoiceWarning,
+  onLogout,
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -256,7 +259,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             id="navbar-profile-avatar-btn"
             onClick={onOpenProfile}
-            className="w-9 h-9 rounded-xl overflow-hidden border border-slate-200/90 hover:ring-2 hover:ring-blue-400 transition-all shrink-0"
+            className="w-9 h-9 rounded-xl overflow-hidden border border-slate-200/90 hover:ring-2 hover:ring-blue-400 transition-all shrink-0 cursor-pointer"
+            title={`Profil: ${employee.name}`}
           >
             <img
               src={employee.avatarUrl}
@@ -265,6 +269,19 @@ export const Navbar: React.FC<NavbarProps> = ({
               referrerPolicy="no-referrer"
             />
           </button>
+
+          {/* Logout Button */}
+          {onLogout && (
+            <button
+              id="navbar-logout-btn"
+              onClick={onLogout}
+              className="p-2 rounded-xl border border-slate-200 bg-rose-50/60 hover:bg-rose-100/80 text-rose-600 hover:text-rose-700 active:scale-95 transition-all shrink-0 cursor-pointer"
+              title="Keluar / Logout dari Akun"
+              aria-label="Logout"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
     </header>

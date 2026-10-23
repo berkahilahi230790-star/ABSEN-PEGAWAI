@@ -65,6 +65,7 @@ import {
 import {
   saveDrivePhotoFolderToFirestore,
   fetchDrivePhotoFolderFromFirestore,
+  saveSpreadsheetConfigToFirestore,
 } from "../services/firebase";
 import { WorkspaceConfirmModal } from "./WorkspaceConfirmModal";
 import { User } from "firebase/auth";
@@ -116,12 +117,23 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   const [photoDriveFolderSaved, setPhotoDriveFolderSaved] = useState(false);
   const [isSavingPhotoDriveFolder, setIsSavingPhotoDriveFolder] = useState(false);
 
-  // Fetch Firestore photo folder setting on mount
+  // Fetch Firestore photo folder setting & spreadsheet on mount
   useEffect(() => {
     fetchDrivePhotoFolderFromFirestore().then((res) => {
-      if (res && res.photoFolderUrl) {
-        setStoredPhotoDriveFolder(res.photoFolderUrl);
-        setPhotoDriveFolderInput((prev) => prev || res.photoFolderUrl);
+      if (res) {
+        if (res.photoFolderUrl) {
+          setStoredPhotoDriveFolder(res.photoFolderUrl);
+          setPhotoDriveFolderInput((prev) => prev || res.photoFolderUrl);
+        }
+        if (res.spreadsheetUrl) {
+          try {
+            localStorage.setItem("presensigo_google_sheet_url", res.spreadsheetUrl);
+            if (res.spreadsheetId) {
+              localStorage.setItem("presensigo_google_sheet_id", res.spreadsheetId);
+            }
+          } catch {}
+          setSpreadsheetUrl((prev) => prev || res.spreadsheetUrl || null);
+        }
       }
     });
   }, []);
@@ -220,6 +232,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
         try {
           const sheet = await getOrCreateAttendanceSpreadsheet();
           setSpreadsheetUrl(sheet.spreadsheetUrl);
+          await saveSpreadsheetConfigToFirestore(sheet.spreadsheetUrl, sheet.spreadsheetId);
         } catch (sErr) {}
         loadDriveFiles();
         showSuccess();
@@ -270,8 +283,16 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   // Local state for Schedule
   const [workConfig, setWorkConfig] = useState<WorkScheduleConfig>({ ...schedule });
 
+  useEffect(() => {
+    setWorkConfig({ ...schedule });
+  }, [schedule]);
+
   // Local state for Branding
   const [brandConfig, setBrandConfig] = useState<CompanyBranding>({ ...branding });
+
+  useEffect(() => {
+    setBrandConfig({ ...branding });
+  }, [branding]);
 
   // Banner editor state
   const [newBannerTitle, setNewBannerTitle] = useState("");
@@ -360,21 +381,69 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     }
   };
 
+  // Client-side image compression helper to keep Firestore document size small and fast
+  const compressImageToDataUrl = (
+    file: File,
+    maxWidth: number,
+    maxHeight: number,
+    quality = 0.85
+  ): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      if (file.type === "image/svg+xml") {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+        return;
+      }
+      const img = new Image();
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        img.src = e.target?.result as string;
+      };
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+        if (width > maxWidth || height > maxHeight) {
+          if (width / height > maxWidth / maxHeight) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          } else {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(img.src);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = reject;
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
   // Process Banner File Upload
-  const processBannerFile = (file: File) => {
+  const processBannerFile = async (file: File) => {
     if (!file.type.startsWith("image/")) {
       alert("Harap unggah file gambar yang valid (JPG, PNG, WebP, SVG).");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        setNewBannerImg(reader.result);
-        setBannerUploadFileName(file.name);
-        audioNotificationService.playChime("normal");
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageToDataUrl(file, 1000, 500, 0.82);
+      setNewBannerImg(compressed);
+      setBannerUploadFileName(file.name);
+      audioNotificationService.playChime("normal");
+    } catch {
+      alert("Gagal memproses gambar banner.");
+    }
   };
 
   const handleBannerFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -393,26 +462,25 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
   };
 
   // Update existing banner image upload
-  const handleUpdateExistingBannerImage = (bannerId: string, file: File) => {
+  const handleUpdateExistingBannerImage = async (bannerId: string, file: File) => {
     if (!file.type.startsWith("image/")) {
       alert("Harap unggah file gambar yang valid (JPG, PNG, WebP).");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        const updated = {
-          ...brandConfig,
-          banners: brandConfig.banners.map((b) =>
-            b.id === bannerId ? { ...b, imageUrl: reader.result as string } : b
-          ),
-        };
-        setBrandConfig(updated);
-        onSaveBranding(updated);
-        showSuccess();
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageToDataUrl(file, 1000, 500, 0.82);
+      const updated = {
+        ...brandConfig,
+        banners: brandConfig.banners.map((b) =>
+          b.id === bannerId ? { ...b, imageUrl: compressed } : b
+        ),
+      };
+      setBrandConfig(updated);
+      onSaveBranding(updated);
+      showSuccess();
+    } catch {
+      alert("Gagal memperbarui gambar banner.");
+    }
   };
 
   // Toggle existing banner active state
@@ -472,24 +540,23 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
     onSaveBranding(updated);
   };
 
-  // Handle Logo Upload with FileReader (Persists in localStorage)
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle Logo Upload with FileReader & Compression (Persists to Cloud Firebase)
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (!file.type.startsWith("image/")) {
         alert("Harap pilih file gambar logo (JPG, PNG, WebP, SVG).");
         return;
       }
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") {
-          const updated = { ...brandConfig, logoUrl: reader.result };
-          setBrandConfig(updated);
-          onSaveBranding(updated);
-          showSuccess();
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImageToDataUrl(file, 320, 320, 0.88);
+        const updated = { ...brandConfig, logoUrl: compressed };
+        setBrandConfig(updated);
+        onSaveBranding(updated);
+        showSuccess();
+      } catch {
+        alert("Gagal memproses file logo.");
+      }
     }
   };
 
@@ -930,6 +997,26 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
             <p className="text-[11px] text-slate-500">
               Atur logo perusahaan, gradasi warna tema modern, dan informasi banner dashboard
             </p>
+          </div>
+
+          {/* Cloud Sync Status Banner */}
+          <div className="p-3 bg-gradient-to-r from-blue-50/90 to-indigo-50/90 border border-blue-200 rounded-2xl flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                <Cloud className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <span>Sinkronisasi Cloud Firebase Aktif</span>
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    Otomatis Multi-Perangkat
+                  </span>
+                </h4>
+                <p className="text-[11px] text-slate-600">
+                  Nama perusahaan, logo, dan banner tersimpan di Cloud Firebase sehingga otomatis tampil seragam di seluruh HP dan komputer pegawai.
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Company Name & Tagline */}
@@ -1418,8 +1505,8 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
             onClick={handleSaveBranding}
             className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition-all cursor-pointer"
           >
-            <Save className="w-4 h-4" />
-            <span>Terapkan Seluruh Branding & Banner</span>
+            <Cloud className="w-4 h-4" />
+            <span>Terapkan & Simpan ke Cloud Firebase</span>
           </button>
         </div>
       )}
@@ -1494,18 +1581,18 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
               <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div>
                   <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 mb-1">
-                    Belum Terhubung
+                    Belum Terhubung di Perangkat Ini
                   </span>
                   <h4 className="text-xs font-bold text-slate-800">Masuk untuk mengaktifkan sinkronisasi</h4>
                   <p className="text-[11px] text-slate-500">
-                    Data presensi otomatis tersimpan aman di Google Cloud Spreadsheet Anda.
+                    Tautan folder Drive & Spreadsheet disimpan di <strong>Cloud Firebase</strong> untuk semua perangkat. Namun izin login akun Google bersifat per-perangkat/browser (standar keamanan OAuth).
                   </p>
                 </div>
 
                 <button
                   onClick={handleGoogleSignIn}
                   disabled={isSigningInGoogle}
-                  className="inline-flex items-center gap-2.5 px-4 py-2.5 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl shadow-xs font-semibold text-xs text-slate-700 transition-all cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center gap-2.5 px-4 py-2.5 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl shadow-xs font-semibold text-xs text-slate-700 transition-all cursor-pointer disabled:opacity-50 shrink-0"
                 >
                   <svg className="w-4 h-4" viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3h3.88c2.27-2.09 3.665-5.17 3.665-9.09z" />
@@ -1677,9 +1764,15 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({
 
               {/* Input Form with Link Icon */}
               <div className="space-y-1.5">
-                <label className="block text-[11px] font-bold text-slate-700">
-                  Tautan (URL) Folder Google Drive untuk Foto Absensi:
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-[11px] font-bold text-slate-700">
+                    Tautan (URL) Folder Google Drive untuk Foto Absensi:
+                  </label>
+                  <span className="text-[10px] text-blue-700 bg-blue-100/90 px-2 py-0.5 rounded-md font-semibold flex items-center gap-1">
+                    <Cloud className="w-3 h-3 text-blue-600" />
+                    Tersinkron di Cloud Firebase
+                  </span>
+                </div>
                 <div className="relative flex items-center">
                   <div className="absolute left-3 text-slate-400 pointer-events-none">
                     <Link2 className="w-4 h-4 text-blue-500" />

@@ -13,6 +13,7 @@ import {
   Camera,
   KeyRound,
   IdCard,
+  LogOut,
 } from "lucide-react";
 import { EmployeeProfile, WorkScheduleConfig } from "../types";
 import { audioNotificationService } from "../services/audioNotification";
@@ -24,6 +25,7 @@ interface EmployeeIdentityModalProps {
   schedule: WorkScheduleConfig;
   onOpenUploadPhoto: () => void;
   onOpenChangePassword: () => void;
+  onLogout?: () => void;
 }
 
 export const EmployeeIdentityModal: React.FC<EmployeeIdentityModalProps> = ({
@@ -33,6 +35,7 @@ export const EmployeeIdentityModal: React.FC<EmployeeIdentityModalProps> = ({
   schedule,
   onOpenUploadPhoto,
   onOpenChangePassword,
+  onLogout,
 }) => {
   const [copiedId, setCopiedId] = useState(false);
 
@@ -237,10 +240,26 @@ export const EmployeeIdentityModal: React.FC<EmployeeIdentityModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-end">
+        <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+          {onLogout ? (
+            <button
+              id="id-modal-logout-btn"
+              onClick={() => {
+                onClose();
+                onLogout();
+              }}
+              className="px-3 py-2 rounded-xl text-xs font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Keluar dari Akun</span>
+            </button>
+          ) : (
+            <div />
+          )}
+
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800 text-xs font-bold active:scale-95 transition-all shadow-xs"
+            className="px-4 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800 text-xs font-bold active:scale-95 transition-all shadow-xs cursor-pointer"
           >
             Tutup
           </button>

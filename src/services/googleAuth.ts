@@ -31,10 +31,12 @@ provider.setCustomParameters({
 // Flag to indicate if we are in the middle of a sign-in flow
 let isSigningIn = false;
 
-// Access token cached in-memory and in sessionStorage for current tab session
+// Access token cached in-memory, localStorage, and sessionStorage
 let cachedAccessToken: string | null = null;
 try {
-  cachedAccessToken = sessionStorage.getItem(SESSION_TOKEN_KEY);
+  cachedAccessToken =
+    localStorage.getItem(SESSION_TOKEN_KEY) ||
+    sessionStorage.getItem(SESSION_TOKEN_KEY);
 } catch {}
 
 let currentGoogleUser: User | null = null;
@@ -49,7 +51,9 @@ export const initAuth = (
     if (user) {
       if (!cachedAccessToken) {
         try {
-          cachedAccessToken = sessionStorage.getItem(SESSION_TOKEN_KEY);
+          cachedAccessToken =
+            localStorage.getItem(SESSION_TOKEN_KEY) ||
+            sessionStorage.getItem(SESSION_TOKEN_KEY);
         } catch {}
       }
       if (cachedAccessToken) {
@@ -60,6 +64,7 @@ export const initAuth = (
     } else {
       cachedAccessToken = null;
       try {
+        localStorage.removeItem(SESSION_TOKEN_KEY);
         sessionStorage.removeItem(SESSION_TOKEN_KEY);
       } catch {}
       currentGoogleUser = null;
@@ -80,6 +85,7 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 
     cachedAccessToken = credential.accessToken;
     try {
+      localStorage.setItem(SESSION_TOKEN_KEY, credential.accessToken);
       sessionStorage.setItem(SESSION_TOKEN_KEY, credential.accessToken);
     } catch {}
     currentGoogleUser = result.user;
@@ -115,7 +121,9 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 export const getAccessToken = async (): Promise<string | null> => {
   if (!cachedAccessToken) {
     try {
-      cachedAccessToken = sessionStorage.getItem(SESSION_TOKEN_KEY);
+      cachedAccessToken =
+        localStorage.getItem(SESSION_TOKEN_KEY) ||
+        sessionStorage.getItem(SESSION_TOKEN_KEY);
     } catch {}
   }
   return cachedAccessToken;
@@ -129,6 +137,7 @@ export const logoutGoogle = async () => {
   await signOut(auth);
   cachedAccessToken = null;
   try {
+    localStorage.removeItem(SESSION_TOKEN_KEY);
     sessionStorage.removeItem(SESSION_TOKEN_KEY);
   } catch {}
   currentGoogleUser = null;

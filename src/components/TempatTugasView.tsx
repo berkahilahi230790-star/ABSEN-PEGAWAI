@@ -140,6 +140,7 @@ export const TempatTugasView: React.FC<TempatTugasViewProps> = ({
       return;
     }
 
+    const existing = workLocations.find((w) => w.id === editingId);
     const newLocation: WorkLocation = {
       id: editingId || `loc-${Date.now()}`,
       name: name.trim(),
@@ -149,7 +150,7 @@ export const TempatTugasView: React.FC<TempatTugasViewProps> = ({
       radiusMeters: Number(radiusMeters) || 150,
       description: description.trim(),
       isMainOffice: Boolean(isMainOffice),
-      createdAt: editingId ? undefined : new Date().toISOString(),
+      createdAt: existing?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 

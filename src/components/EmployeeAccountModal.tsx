@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { EmployeeProfile, WorkScheduleConfig } from "../types";
 import { audioNotificationService } from "../services/audioNotification";
+import { getEmployeePassword, setEmployeePassword } from "../services/authService";
 
 interface EmployeeAccountModalProps {
   isOpen: boolean;
@@ -34,15 +35,6 @@ interface EmployeeAccountModalProps {
   onUpdateProfile: (updated: EmployeeProfile) => void;
   initialTab?: "identity" | "photo" | "password";
 }
-
-const PRESET_AVATARS = [
-  "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=300&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=300&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=300&auto=format&fit=crop&q=80",
-];
 
 export const EmployeeAccountModal: React.FC<EmployeeAccountModalProps> = ({
   isOpen,
@@ -127,10 +119,37 @@ export const EmployeeAccountModal: React.FC<EmployeeAccountModalProps> = ({
       return;
     }
     const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        setSelectedPhoto(reader.result);
-      }
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX_SIZE = 400;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_SIZE) {
+            height = Math.round((height * MAX_SIZE) / width);
+            width = MAX_SIZE;
+          }
+        } else {
+          if (height > MAX_SIZE) {
+            width = Math.round((width * MAX_SIZE) / height);
+            height = MAX_SIZE;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          setSelectedPhoto(canvas.toDataURL("image/jpeg", 0.85));
+        } else {
+          setSelectedPhoto(e.target?.result as string);
+        }
+      };
+      img.src = e.target?.result as string;
     };
     reader.readAsDataURL(file);
   };
@@ -191,6 +210,14 @@ export const EmployeeAccountModal: React.FC<EmployeeAccountModalProps> = ({
       audioNotificationService.playChime("warning");
       return;
     }
+
+    const expectedCurrent = getEmployeePassword(employee.id);
+    if (currentPassword !== expectedCurrent) {
+      setPwdError("Kata sandi saat ini tidak cocok. Kata sandi default adalah 123456.");
+      audioNotificationService.playChime("warning");
+      return;
+    }
+
     if (newPassword.length < 6) {
       setPwdError("Kata sandi baru minimal 6 karakter.");
       audioNotificationService.playChime("warning");
@@ -209,6 +236,7 @@ export const EmployeeAccountModal: React.FC<EmployeeAccountModalProps> = ({
 
     setIsSubmittingPwd(true);
     setTimeout(() => {
+      setEmployeePassword(employee.id, newPassword);
       try {
         localStorage.setItem(`presensigo_pwd_updated_${employee.id}`, new Date().toISOString());
       } catch (err) {}
@@ -535,43 +563,28 @@ export const EmployeeAccountModal: React.FC<EmployeeAccountModalProps> = ({
                 </p>
               </div>
 
-              {/* Preset Avatars Selection */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-700">Atau Pilih Karakter Avatar Cepat:</span>
-                  {selectedPhoto && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedPhoto(null)}
-                      className="text-[10px] text-rose-600 font-semibold hover:underline flex items-center gap-0.5 cursor-pointer"
-                    >
-                      <RefreshCw className="w-2.5 h-2.5" />
-                      Reset
-                    </button>
-                  )}
-                </div>
+              {/* Tombol Utama Upload Foto Pegawai */}
+              <div className="pt-1 flex flex-col items-center gap-2">
+                <button
+                  id="account-btn-upload-foto"
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white font-bold text-xs shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>Upload Foto Pegawai</span>
+                </button>
 
-                <div className="grid grid-cols-6 gap-2">
-                  {PRESET_AVATARS.map((url, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => setSelectedPhoto(url)}
-                      className={`w-full aspect-square rounded-xl overflow-hidden border-2 transition-all active:scale-95 cursor-pointer ${
-                        selectedPhoto === url
-                          ? "border-emerald-600 ring-2 ring-emerald-300 scale-105"
-                          : "border-slate-200 hover:border-slate-400 opacity-80 hover:opacity-100"
-                      }`}
-                    >
-                      <img
-                        src={url}
-                        alt={`Avatar ${idx + 1}`}
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                    </button>
-                  ))}
-                </div>
+                {selectedPhoto && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPhoto(null)}
+                    className="text-[11px] text-rose-600 font-semibold hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>Batalkan pilihan foto baru</span>
+                  </button>
+                )}
               </div>
 
               {/* Save Photo Button */}

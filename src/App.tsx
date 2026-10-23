@@ -54,6 +54,12 @@ import { GoogleWorkspaceModal } from "./components/GoogleWorkspaceModal";
 import { PimpinanGpsModal } from "./components/PimpinanGpsModal";
 import { TempatTugasView } from "./components/TempatTugasView";
 import { PegawaiView } from "./components/PegawaiView";
+import { LoginPage } from "./components/LoginPage";
+import {
+  AuthSession,
+  getStoredAuthSession,
+  clearAuthSession,
+} from "./services/authService";
 import {
   initAuth,
   getAccessToken,
@@ -70,11 +76,17 @@ import {
   testFirestoreConnection,
   saveLeaveRequestToFirestore,
   saveScheduleToFirestore,
+  fetchScheduleFromFirestore,
+  subscribeToSchedule,
+  saveBrandingToFirestore,
+  fetchBrandingFromFirestore,
+  subscribeToBranding,
   fetchDrivePhotoFolderFromFirestore,
   fetchWorkLocationsFromFirestore,
   saveWorkLocationToFirestore,
   deleteWorkLocationFromFirestore,
   syncWorkLocationsToFirestore,
+  subscribeToWorkLocations,
   syncEmployeesToFirestore,
 } from "./services/firebase";
 
@@ -104,14 +116,33 @@ import {
   HardDrive,
   Building,
   Users,
+  LogOut,
 } from "lucide-react";
 
 export default function App() {
+  // Authentication Session State (Null = Show Login Page)
+  const [authSession, setAuthSession] = useState<AuthSession | null>(getStoredAuthSession);
+
   // Application Data States
   const [employees, setEmployees] = useState<EmployeeProfile[]>(getStoredEmployees);
   const [workLocations, setWorkLocations] = useState<WorkLocation[]>(getStoredWorkLocations);
-  const [currentEmployee, setCurrentEmployee] = useState<EmployeeProfile>(employees[0]);
-  const [currentRole, setCurrentRole] = useState<UserRole>("employee");
+  const [currentEmployee, setCurrentEmployee] = useState<EmployeeProfile>(() => {
+    const session = getStoredAuthSession();
+    const storedEmps = getStoredEmployees();
+    if (session) {
+      if (session.isAdministrator) {
+        return storedEmps.find((e) => e.role === "manager") || storedEmps[3] || storedEmps[0];
+      }
+      if (session.employeeId) {
+        return storedEmps.find((e) => e.id === session.employeeId) || storedEmps[0];
+      }
+    }
+    return storedEmps[0];
+  });
+  const [currentRole, setCurrentRole] = useState<UserRole>(() => {
+    const session = getStoredAuthSession();
+    return session ? session.role : "employee";
+  });
   const [schedule, setSchedule] = useState<WorkScheduleConfig>(getStoredSchedule);
   const [branding, setBranding] = useState<CompanyBranding>(getStoredBranding);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(getStoredAttendanceRecords);
@@ -170,6 +201,33 @@ export default function App() {
       }
     });
 
+    // Synchronize company branding from Firestore (Company Name, Logo, Banners, Theme)
+    fetchBrandingFromFirestore()
+      .then((remoteBranding) => {
+        if (remoteBranding && remoteBranding.companyName) {
+          setBranding(remoteBranding);
+          saveBranding(remoteBranding);
+        } else {
+          const localBranding = getStoredBranding();
+          if (localBranding && localBranding.companyName) {
+            saveBrandingToFirestore(localBranding).catch((e) =>
+              console.warn("Initial sync branding to Firestore:", e)
+            );
+          }
+        }
+      })
+      .catch((e) => console.warn("Fetch remote branding error:", e));
+
+    // Synchronize work schedule & office location from Firestore
+    fetchScheduleFromFirestore()
+      .then((remoteSchedule) => {
+        if (remoteSchedule && remoteSchedule.checkInTime) {
+          setSchedule(remoteSchedule);
+          saveSchedule(remoteSchedule);
+        }
+      })
+      .catch((e) => console.warn("Fetch remote schedule error:", e));
+
     // Synchronize work locations from Firestore
     fetchWorkLocationsFromFirestore()
       .then((remoteLocations) => {
@@ -187,8 +245,13 @@ export default function App() {
       })
       .catch((e) => console.warn("Fetch remote work locations:", e));
 
+    let unsubAttendance: (() => void) | undefined;
+    let unsubBranding: (() => void) | undefined;
+    let unsubSchedule: (() => void) | undefined;
+    let unsubWorkLocations: (() => void) | undefined;
+
     try {
-      const unsubFirestore = subscribeToAttendance(
+      unsubAttendance = subscribeToAttendance(
         (firestoreRecords) => {
           if (firestoreRecords && firestoreRecords.length > 0) {
             setAttendanceRecords((prev) => {
@@ -212,10 +275,49 @@ export default function App() {
           console.log("Firestore live sync listener:", err);
         }
       );
-      return () => unsubFirestore();
     } catch (e) {
-      console.warn("Firestore subscription init error:", e);
+      console.warn("Firestore attendance subscription error:", e);
     }
+
+    try {
+      unsubBranding = subscribeToBranding((remoteBranding) => {
+        if (remoteBranding && remoteBranding.companyName) {
+          setBranding(remoteBranding);
+          saveBranding(remoteBranding);
+        }
+      });
+    } catch (e) {
+      console.warn("Firestore branding subscription error:", e);
+    }
+
+    try {
+      unsubSchedule = subscribeToSchedule((remoteSchedule) => {
+        if (remoteSchedule && remoteSchedule.checkInTime) {
+          setSchedule(remoteSchedule);
+          saveSchedule(remoteSchedule);
+        }
+      });
+    } catch (e) {
+      console.warn("Firestore schedule subscription error:", e);
+    }
+
+    try {
+      unsubWorkLocations = subscribeToWorkLocations((remoteLocations) => {
+        if (remoteLocations && remoteLocations.length > 0) {
+          setWorkLocations(remoteLocations);
+          saveWorkLocations(remoteLocations);
+        }
+      });
+    } catch (e) {
+      console.warn("Firestore work locations subscription error:", e);
+    }
+
+    return () => {
+      if (unsubAttendance) unsubAttendance();
+      if (unsubBranding) unsubBranding();
+      if (unsubSchedule) unsubSchedule();
+      if (unsubWorkLocations) unsubWorkLocations();
+    };
   }, []);
 
   // Modals for Employee Identity, Password, and Photo / Account
@@ -224,6 +326,30 @@ export default function App() {
   const [identityModalOpen, setIdentityModalOpen] = useState(false);
   const [changePasswordModalOpen, setChangePasswordModalOpen] = useState(false);
   const [uploadPhotoModalOpen, setUploadPhotoModalOpen] = useState(false);
+
+  // Auth Handlers
+  const handleLoginSuccess = (session: AuthSession, emp?: EmployeeProfile) => {
+    setAuthSession(session);
+    if (session.isAdministrator) {
+      setCurrentRole("manager");
+      const adminEmp = emp || employees.find((e) => e.role === "manager") || employees[3] || employees[0];
+      if (adminEmp) setCurrentEmployee(adminEmp);
+      setCurrentView("manager");
+    } else {
+      const targetEmp = emp || employees.find((e) => e.id === session.employeeId) || employees[0];
+      setCurrentEmployee(targetEmp);
+      setCurrentRole(targetEmp.role || "employee");
+      setCurrentView(targetEmp.role === "manager" ? "manager" : "home");
+    }
+  };
+
+  const handleLogout = () => {
+    if (confirm("Apakah Anda yakin ingin keluar dari aplikasi?")) {
+      clearAuthSession();
+      setAuthSession(null);
+      audioNotificationService.playChime("normal");
+    }
+  };
 
   // Handler for updating full employee profile (name, email, phone, avatar)
   const handleUpdateEmployeeProfile = (updatedEmployee: EmployeeProfile) => {
@@ -587,6 +713,9 @@ export default function App() {
   const handleSaveBranding = (newBranding: CompanyBranding) => {
     setBranding(newBranding);
     saveBranding(newBranding);
+    saveBrandingToFirestore(newBranding).catch((e) =>
+      console.warn("Firestore branding save error:", e)
+    );
   };
 
   const handleUpdateEmployeeQuota = (employeeId: string, newQuota: number) => {
@@ -631,6 +760,17 @@ export default function App() {
   };
 
   const unreadNotificationsCount = notifications.filter((n) => !n.read).length;
+
+  // Gatekeeper: Render Login Page if not logged in
+  if (!authSession) {
+    return (
+      <LoginPage
+        branding={branding}
+        employees={employees}
+        onLoginSuccess={handleLoginSuccess}
+      />
+    );
+  }
 
   return (
     <div className={`min-h-screen bg-gradient-to-br ${getThemeBgStyle()} text-slate-800 flex flex-col font-sans transition-colors duration-500 selection:bg-blue-600 selection:text-white`}>
@@ -783,6 +923,33 @@ export default function App() {
                   <span>Pegawai</span>
                 </>
               )}
+            </button>
+
+            {/* Avatar Profil Pegawai / Admin */}
+            <button
+              id="header-user-avatar-btn"
+              onClick={() => setIdentityModalOpen(true)}
+              className="w-7 h-7 rounded-lg overflow-hidden border border-slate-200 hover:ring-2 hover:ring-blue-400 transition-all shrink-0 cursor-pointer"
+              title={`Buka Identitas Pegawai: ${currentEmployee.name}`}
+            >
+              <img
+                src={currentEmployee.avatarUrl}
+                alt={currentEmployee.name}
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            </button>
+
+            {/* Tombol Logout / Keluar Aplikasi */}
+            <button
+              id="header-logout-btn"
+              onClick={handleLogout}
+              className="p-1.5 rounded-lg border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 hover:text-rose-700 active:scale-95 transition-all shrink-0 cursor-pointer flex items-center gap-1"
+              title="Keluar / Logout dari Aplikasi"
+              aria-label="Logout"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline text-[10px] font-bold">Keluar</span>
             </button>
           </div>
         </div>
@@ -1391,6 +1558,7 @@ export default function App() {
           setAccountInitialTab("password");
           setAccountModalOpen(true);
         }}
+        onLogout={handleLogout}
       />
 
       {/* 8. Change Password Modal (Ubah Password) */}
