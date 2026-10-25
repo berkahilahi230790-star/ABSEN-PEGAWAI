@@ -55,6 +55,7 @@ import { PimpinanGpsModal } from "./components/PimpinanGpsModal";
 import { TempatTugasView } from "./components/TempatTugasView";
 import { PegawaiView } from "./components/PegawaiView";
 import { LoginPage } from "./components/LoginPage";
+import { PWAInstallButton } from "./components/PWAInstallButton";
 import {
   AuthSession,
   getStoredAuthSession,
@@ -925,6 +926,9 @@ export default function App() {
               )}
             </button>
 
+            {/* PWA Install Button Header */}
+            <PWAInstallButton variant="compact" />
+
             {/* Avatar Profil Pegawai / Admin */}
             <button
               id="header-user-avatar-btn"
@@ -957,6 +961,9 @@ export default function App() {
 
       {/* Main Content Container */}
       <main className="flex-1 w-full max-w-4xl mx-auto px-3 sm:px-4 py-3 flex flex-col">
+        {/* PWA Install Banner inside app */}
+        <PWAInstallButton variant="banner" className="mb-3" />
+
         {/* Interactive Role Switcher Selector Bar */}
         <div className="mb-3 p-2 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shadow-md flex items-center justify-between gap-2 border border-slate-800 shrink-0">
           <div className="flex items-center gap-2 min-w-0">

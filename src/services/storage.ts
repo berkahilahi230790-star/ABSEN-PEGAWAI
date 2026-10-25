@@ -182,9 +182,9 @@ export const DEFAULT_WORK_SCHEDULE: WorkScheduleConfig = {
 };
 
 export const DEFAULT_BRANDING: CompanyBranding = {
-  companyName: "PresensiGo Digital Corp",
-  tagline: "Sistem Presensi & Manajemen SDM Modern",
-  logoUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=120&auto=format&fit=crop&q=80",
+  companyName: "Presensi Go",
+  tagline: "Sistem Presensi Pegawai Berbasis Wajah & GPS",
+  logoUrl: "/assets/aistudio/photo_6262753760518017337_x_4519ad83.jpg",
   themePreset: "blue-gradient",
   banners: [
     {
@@ -475,7 +475,14 @@ export function getStoredBranding(): CompanyBranding {
       localStorage.setItem(KEYS.BRANDING, JSON.stringify(DEFAULT_BRANDING));
       return DEFAULT_BRANDING;
     }
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!parsed.logoUrl || parsed.logoUrl.includes("unsplash.com")) {
+      parsed.logoUrl = DEFAULT_BRANDING.logoUrl;
+    }
+    if (!parsed.companyName || parsed.companyName.includes("Digital Corp")) {
+      parsed.companyName = "Presensi Go";
+    }
+    return parsed;
   } catch (e) {
     return DEFAULT_BRANDING;
   }
