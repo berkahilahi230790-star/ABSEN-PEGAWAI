@@ -984,39 +984,6 @@ export default function App() {
               )}
             </button>
 
-            {/* Tombol Role Badge */}
-            <button
-              onClick={() => setRoleModalOpen(true)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 border transition-all cursor-pointer ${
-                currentRole === "pimpinan"
-                  ? "bg-purple-50 text-purple-900 border-purple-300 hover:bg-purple-100"
-                  : currentRole === "manager"
-                  ? "bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100"
-                  : "bg-blue-50 text-blue-900 border-blue-300 hover:bg-blue-100"
-              }`}
-              title="Pilih Role Tampilan"
-            >
-              {currentRole === "pimpinan" ? (
-                <>
-                  <Award className="w-3 h-3 text-purple-700" />
-                  <span>Pimpinan</span>
-                </>
-              ) : currentRole === "manager" ? (
-                <>
-                  <Shield className="w-3 h-3 text-amber-700" />
-                  <span>Admin</span>
-                </>
-              ) : (
-                <>
-                  <UserCheck className="w-3 h-3 text-blue-700" />
-                  <span>Pegawai</span>
-                </>
-              )}
-            </button>
-
-            {/* PWA Install Button Header */}
-            <PWAInstallButton variant="compact" />
-
             {/* Avatar Profil Pegawai / Admin */}
             <button
               id="header-user-avatar-btn"
