@@ -13,11 +13,11 @@ import {
 export const DEFAULT_WORK_LOCATIONS: WorkLocation[] = [
   {
     id: "loc-001",
-    name: "Dinas Pendidikan Kabupaten/Kota (Kantor Induk)",
-    address: "Jl. Jend. Sudirman Kav. 52-53, Senayan, Jakarta Selatan",
-    latitude: -6.224168,
-    longitude: 106.809675,
-    radiusMeters: 200,
+    name: "SMP Negeri 2 tanjung",
+    address: "Jl.Murangga, Tanjung, Lombok Utara",
+    latitude: -8.385904,
+    longitude: 116.112963,
+    radiusMeters: 130,
     description: "Kantor Pusat Induk Administrasi & Koordinasi Dinas",
     isMainOffice: true,
     createdAt: "2026-01-01T08:00:00.000Z",
@@ -169,23 +169,23 @@ export const DEFAULT_WORK_SCHEDULE: WorkScheduleConfig = {
   checkInTime: "08:00",
   lateToleranceMinutes: 15, // late if > 08:15
   checkOutTime: "17:00",
-  officeName: "Head Office - Wisma Mandiri Lt. 12",
-  officeAddress: "Jl. Jend. Sudirman Kav. 52-53, Senayan, Jakarta Selatan",
+  officeName: "SMP Negeri 2 tanjung",
+  officeAddress: "Jl.Murangga, Tanjung, Lombok Utara",
   officeCoordinates: {
-    latitude: -6.224168,
-    longitude: 106.809675,
+    latitude: -8.385904,
+    longitude: 116.112963,
     accuracy: 10,
   },
-  geofenceRadiusMeters: 200,
+  geofenceRadiusMeters: 130,
   enableAiVoiceReminder: true,
   enableFiveMinWarning: true,
 };
 
 export const DEFAULT_BRANDING: CompanyBranding = {
-  companyName: "Presensi Go",
+  companyName: "DIBUDKPORA KLU",
   tagline: "Sistem Presensi Pegawai Berbasis Wajah & GPS",
   logoUrl: "/assets/aistudio/photo_6262753760518017337_x_4519ad83.jpg",
-  themePreset: "blue-gradient",
+  themePreset: "emerald-fresh",
   banners: [
     {
       id: "b-1",
@@ -476,11 +476,11 @@ export function getStoredBranding(): CompanyBranding {
       return DEFAULT_BRANDING;
     }
     const parsed = JSON.parse(raw);
-    if (!parsed.logoUrl || parsed.logoUrl.includes("unsplash.com")) {
+    if (!parsed.logoUrl || parsed.logoUrl.includes("unsplash.com") || parsed.logoUrl.startsWith("blob:")) {
       parsed.logoUrl = DEFAULT_BRANDING.logoUrl;
     }
     if (!parsed.companyName || parsed.companyName.includes("Digital Corp")) {
-      parsed.companyName = "Presensi Go";
+      parsed.companyName = "DIBUDKPORA KLU";
     }
     return parsed;
   } catch (e) {
@@ -520,7 +520,20 @@ export function getStoredEmployees(): EmployeeProfile[] {
       localStorage.setItem(KEYS.EMPLOYEES, JSON.stringify(DEFAULT_EMPLOYEES));
       return DEFAULT_EMPLOYEES;
     }
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      // Ensure NIP exists for each employee if missing
+      return parsed.map((p: EmployeeProfile) => {
+        if (!p.nip) {
+          const defaultMatch = DEFAULT_EMPLOYEES.find((d) => d.id === p.id);
+          if (defaultMatch?.nip) {
+            return { ...p, nip: defaultMatch.nip };
+          }
+        }
+        return p;
+      });
+    }
+    return DEFAULT_EMPLOYEES;
   } catch (e) {
     return DEFAULT_EMPLOYEES;
   }

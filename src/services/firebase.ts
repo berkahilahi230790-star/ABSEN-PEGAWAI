@@ -245,18 +245,136 @@ export function subscribeToAttendance(
       onUpdate(list);
     },
     (error) => {
+      console.warn("[Firestore Live Sync] attendance listener notice:", error);
       if (onError) onError(error);
-      handleFirestoreError(error, OperationType.LIST, "attendance");
     }
   );
 }
 
-// 7. Sync Employees to Firestore
+// 7. Employee Firestore Operations (Fetch, Realtime Subscribe, Save, Sync)
+export async function saveEmployeeToFirestore(employee: EmployeeProfile): Promise<void> {
+  const path = `employees/${employee.id}`;
+  try {
+    const dataToSave = cleanFirestoreData({
+      ...employee,
+      nip: employee.nip || null,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(db, "employees", employee.id), dataToSave, { merge: true });
+    console.log(`[Firestore] Employee ${employee.name} (${employee.id}) synced`);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteEmployeeFromFirestore(empId: string): Promise<void> {
+  const path = `employees/${empId}`;
+  try {
+    await deleteDoc(doc(db, "employees", empId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function fetchEmployeesFromFirestore(): Promise<EmployeeProfile[]> {
+  const path = "employees";
+  try {
+    const querySnapshot = await getDocs(collection(db, "employees"));
+    const employees: EmployeeProfile[] = [];
+    querySnapshot.forEach((d) => {
+      const data = d.data();
+      if (data && data.name) {
+        employees.push({
+          id: data.id || d.id,
+          name: data.name,
+          nip: data.nip || undefined,
+          email: data.email || "",
+          phone: data.phone || "+62 812-0000-0000",
+          position: data.position || "Pegawai",
+          department: data.department || "Dinas Pendidikan",
+          workLocationId: data.workLocationId || undefined,
+          workLocationName: data.workLocationName || undefined,
+          role: data.role || "employee",
+          avatarUrl: data.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80",
+          annualLeaveQuota: Number(data.annualLeaveQuota) || 12,
+          usedLeave: Number(data.usedLeave) || 0,
+        });
+      }
+    });
+    return employees;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+    return [];
+  }
+}
+
+export function subscribeToEmployees(
+  onUpdate: (employees: EmployeeProfile[]) => void,
+  onError?: (err: unknown) => void
+): Unsubscribe {
+  return onSnapshot(
+    collection(db, "employees"),
+    (snapshot) => {
+      const employees: EmployeeProfile[] = [];
+      snapshot.forEach((d) => {
+        const data = d.data();
+        if (data && data.name) {
+          employees.push({
+            id: data.id || d.id,
+            name: data.name,
+            nip: data.nip || undefined,
+            email: data.email || "",
+            phone: data.phone || "+62 812-0000-0000",
+            position: data.position || "Pegawai",
+            department: data.department || "Dinas Pendidikan",
+            workLocationId: data.workLocationId || undefined,
+            workLocationName: data.workLocationName || undefined,
+            role: data.role || "employee",
+            avatarUrl: data.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80",
+            annualLeaveQuota: Number(data.annualLeaveQuota) || 12,
+            usedLeave: Number(data.usedLeave) || 0,
+          });
+        }
+      });
+      if (employees.length > 0) {
+        onUpdate(employees);
+      }
+    },
+    (error) => {
+      console.warn("[Firestore Live Sync] employees listener notice:", error);
+      if (onError) onError(error);
+    }
+  );
+}
+
+export async function findEmployeeInFirestore(identifier: string): Promise<EmployeeProfile | null> {
+  const cleanId = identifier.trim().toLowerCase();
+  const rawCleanNip = cleanId.replace(/[^a-zA-Z0-9]/g, "");
+
+  try {
+    const list = await fetchEmployeesFromFirestore();
+    const found = list.find((emp) => {
+      const empNipRaw = (emp.nip || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+      if (empNipRaw && (empNipRaw === rawCleanNip || empNipRaw === cleanId)) return true;
+      if (emp.nip && emp.nip.toLowerCase() === cleanId) return true;
+      if (emp.email && emp.email.toLowerCase() === cleanId) return true;
+      if (emp.id && emp.id.toLowerCase() === cleanId) return true;
+      if (emp.name && emp.name.toLowerCase() === cleanId) return true;
+      return false;
+    });
+    return found || null;
+  } catch (err) {
+    console.warn("Error searching employee in Firestore:", err);
+    return null;
+  }
+}
+
 export async function syncEmployeesToFirestore(employees: EmployeeProfile[]): Promise<void> {
   for (const emp of employees) {
     try {
       const dataToSave = cleanFirestoreData({
         ...emp,
+        nip: emp.nip || null,
         updatedAt: new Date().toISOString(),
       });
       await setDoc(doc(db, "employees", emp.id), dataToSave, { merge: true });
@@ -420,10 +538,19 @@ export function subscribeToWorkLocations(
       }
     },
     (error) => {
+      console.warn("[Firestore Live Sync] workLocations listener notice:", error);
       if (onError) onError(error);
-      handleFirestoreError(error, OperationType.LIST, "workLocations");
     }
   );
+}
+
+// Helper to ensure logo URLs are accessible across ALL devices (never broken blob: URLs)
+export function sanitizeLogoUrl(rawUrl?: string | null): string {
+  const fallback = "/assets/aistudio/photo_6262753760518017337_x_4519ad83.jpg";
+  if (!rawUrl || rawUrl.startsWith("blob:") || rawUrl.trim() === "" || rawUrl.includes("Digital Corp")) {
+    return fallback;
+  }
+  return rawUrl;
 }
 
 // 12. Company Branding Firestore Persistence & Realtime Listener
@@ -432,9 +559,11 @@ export async function saveBrandingToFirestore(branding: CompanyBranding): Promis
   try {
     const dataToSave = cleanFirestoreData({
       ...branding,
+      logoUrl: sanitizeLogoUrl(branding.logoUrl),
       updatedAt: new Date().toISOString(),
     });
     await setDoc(doc(db, "companySettings", "branding"), dataToSave, { merge: true });
+    console.log("[Firestore] Company branding saved successfully across devices");
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -447,10 +576,10 @@ export async function fetchBrandingFromFirestore(): Promise<CompanyBranding | nu
     if (docSnap.exists()) {
       const data = docSnap.data();
       return {
-        companyName: data.companyName || "PresensiGo",
-        tagline: data.tagline || "",
-        logoUrl: data.logoUrl || "",
-        themePreset: data.themePreset || "blue-gradient",
+        companyName: data.companyName || "DIBUDKPORA KLU",
+        tagline: data.tagline || "Sistem Presensi Pegawai Berbasis Wajah & GPS",
+        logoUrl: sanitizeLogoUrl(data.logoUrl),
+        themePreset: data.themePreset || "emerald-fresh",
         customPrimaryColor: data.customPrimaryColor || undefined,
         banners: Array.isArray(data.banners) ? data.banners : [],
       };
@@ -472,18 +601,18 @@ export function subscribeToBranding(
       if (snapshot.exists()) {
         const data = snapshot.data();
         onUpdate({
-          companyName: data.companyName || "PresensiGo",
-          tagline: data.tagline || "",
-          logoUrl: data.logoUrl || "",
-          themePreset: data.themePreset || "blue-gradient",
+          companyName: data.companyName || "DIBUDKPORA KLU",
+          tagline: data.tagline || "Sistem Presensi Pegawai Berbasis Wajah & GPS",
+          logoUrl: sanitizeLogoUrl(data.logoUrl),
+          themePreset: data.themePreset || "emerald-fresh",
           customPrimaryColor: data.customPrimaryColor || undefined,
           banners: Array.isArray(data.banners) ? data.banners : [],
         });
       }
     },
     (error) => {
+      console.warn("[Firestore Live Sync] branding listener notice:", error);
       if (onError) onError(error);
-      handleFirestoreError(error, OperationType.GET, "companySettings/branding");
     }
   );
 }
@@ -515,8 +644,8 @@ export function subscribeToSchedule(
       }
     },
     (error) => {
+      console.warn("[Firestore Live Sync] schedule listener notice:", error);
       if (onError) onError(error);
-      handleFirestoreError(error, OperationType.GET, "companySettings/schedule");
     }
   );
 }

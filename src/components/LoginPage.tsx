@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Lock,
   User,
@@ -13,16 +13,24 @@ import {
   Building2,
   Award,
   IdCard,
+  RefreshCw,
 } from "lucide-react";
 import { CompanyBranding, EmployeeProfile, UserRole } from "../types";
 import {
-  authenticateUser,
+  authenticateUserAsync,
   saveAuthSession,
   AuthSession,
   ADMIN_USERNAME,
   ADMIN_PASSWORD,
   DEFAULT_EMPLOYEE_PASSWORD,
 } from "../services/authService";
+import {
+  fetchEmployeesFromFirestore,
+  subscribeToEmployees,
+  fetchBrandingFromFirestore,
+  subscribeToBranding,
+  sanitizeLogoUrl,
+} from "../services/firebase";
 import { audioNotificationService } from "../services/audioNotification";
 import { PWAInstallButton } from "./PWAInstallButton";
 
@@ -34,7 +42,7 @@ interface LoginPageProps {
 
 export const LoginPage: React.FC<LoginPageProps> = ({
   branding,
-  employees,
+  employees: initialEmployees,
   onLoginSuccess,
 }) => {
   const [activeTab, setActiveTab] = useState<"pegawai" | "admin">("pegawai");
@@ -44,6 +52,58 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [rememberMe, setRememberMe] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [activeEmployees, setActiveEmployees] = useState<EmployeeProfile[]>(initialEmployees);
+  const [activeBranding, setActiveBranding] = useState<CompanyBranding>(branding);
+
+  // Synchronize branding in real time from Firestore
+  useEffect(() => {
+    setActiveBranding(branding);
+  }, [branding]);
+
+  useEffect(() => {
+    fetchBrandingFromFirestore()
+      .then((res) => {
+        if (res && res.companyName) {
+          setActiveBranding(res);
+        }
+      })
+      .catch(() => {});
+
+    const unsubBranding = subscribeToBranding((updated) => {
+      if (updated && updated.companyName) {
+        setActiveBranding(updated);
+      }
+    });
+
+    return () => {
+      if (unsubBranding) unsubBranding();
+    };
+  }, []);
+
+  // Synchronize employees from Firestore on mount and listen to changes
+  useEffect(() => {
+    setActiveEmployees(initialEmployees);
+
+    // 1. Fetch latest employees from Firestore
+    fetchEmployeesFromFirestore()
+      .then((remoteEmps) => {
+        if (remoteEmps && remoteEmps.length > 0) {
+          setActiveEmployees(remoteEmps);
+        }
+      })
+      .catch((err) => console.warn("LoginPage: Fetch remote employees error:", err));
+
+    // 2. Subscribe to realtime updates for employees
+    const unsub = subscribeToEmployees((updatedEmps) => {
+      if (updatedEmps && updatedEmps.length > 0) {
+        setActiveEmployees(updatedEmps);
+      }
+    });
+
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [initialEmployees]);
 
   // Switch tabs
   const handleSwitchTab = (tab: "pegawai" | "admin") => {
@@ -53,9 +113,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       setIdentifier(ADMIN_USERNAME);
       setPassword(ADMIN_PASSWORD);
     } else {
-      // Default to first employee's NIP
-      const firstEmp = employees[0];
-      setIdentifier(firstEmp?.nip || firstEmp?.email || "198709212010011005");
+      // Default to first employee's NIP if field was empty
+      if (!identifier || identifier === ADMIN_USERNAME) {
+        const firstEmp = activeEmployees[0];
+        setIdentifier(firstEmp?.nip || firstEmp?.email || "198709212010011005");
+      }
       setPassword(DEFAULT_EMPLOYEE_PASSWORD);
     }
   };
@@ -63,19 +125,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   // Quick fill specific employee
   const handleQuickSelectEmployee = (emp: EmployeeProfile) => {
     setActiveTab("pegawai");
-    setIdentifier(emp.nip || emp.email);
+    setIdentifier(emp.nip || emp.email || emp.id);
     setPassword(DEFAULT_EMPLOYEE_PASSWORD);
     setErrorMessage(null);
   };
 
   // Handle Login submission
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
     setIsLoading(true);
 
-    setTimeout(() => {
-      const result = authenticateUser(identifier, password, employees);
+    try {
+      const result = await authenticateUserAsync(identifier, password, activeEmployees);
 
       if (result.success && result.session) {
         audioNotificationService.playChime("success");
@@ -85,10 +147,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         onLoginSuccess(result.session, result.employee);
       } else {
         audioNotificationService.playChime("warning");
-        setErrorMessage(result.error || "Gagal masuk. Periksa kembali username dan password.");
+        setErrorMessage(
+          result.error || "Gagal masuk. Periksa kembali NIP/Username dan kata sandi Anda."
+        );
         setIsLoading(false);
       }
-    }, 400);
+    } catch (err) {
+      console.error("Login submission error:", err);
+      setErrorMessage("Terjadi kendala koneksi saat memverifikasi akun. Silakan coba lagi.");
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -105,18 +173,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-900 text-white p-6 relative overflow-hidden">
           <div className="absolute right-0 top-0 w-32 h-32 bg-white/10 rounded-full blur-2xl pointer-events-none" />
           
-          <div className="flex items-center gap-3.5 relative z-10">
-            <div className="w-14 h-14 rounded-2xl bg-white p-1.5 shadow-md flex items-center justify-center shrink-0 border border-white/40">
-              {branding.logoUrl ? (
-                <img
-                  src={branding.logoUrl}
-                  alt={branding.companyName}
-                  className="w-full h-full object-contain rounded-xl"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <Building2 className="w-8 h-8 text-blue-700" />
-              )}
+            <div className="w-14 h-14 rounded-2xl bg-white p-1.5 shadow-md flex items-center justify-center shrink-0 border border-white/40 overflow-hidden">
+              <img
+                src={sanitizeLogoUrl(activeBranding.logoUrl)}
+                alt={activeBranding.companyName}
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src =
+                    "/assets/aistudio/photo_6262753760518017337_x_4519ad83.jpg";
+                }}
+                className="w-full h-full object-contain rounded-xl"
+                referrerPolicy="no-referrer"
+              />
             </div>
 
             <div className="min-w-0 flex-1">
@@ -124,10 +191,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 Portal Presensi Terpadu
               </span>
               <h1 className="text-lg sm:text-xl font-extrabold text-white leading-tight truncate">
-                {branding.companyName}
+                {activeBranding.companyName}
               </h1>
               <p className="text-xs text-blue-100 line-clamp-1 mt-0.5 font-medium">
-                {branding.tagline || "Sistem Presensi GPS & Wajah Digital"}
+                {activeBranding.tagline || "Sistem Presensi GPS & Wajah Digital"}
               </p>
             </div>
           </div>
@@ -290,7 +357,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             Pilihan Cepat Masuk Akun Pegawai (Uji Coba):
           </span>
           <div className="grid grid-cols-2 gap-1.5">
-            {employees.slice(0, 4).map((emp) => (
+            {activeEmployees.slice(0, 6).map((emp) => (
               <button
                 key={emp.id}
                 type="button"
@@ -321,7 +388,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
       {/* Footer Info */}
       <p className="mt-4 text-xs text-slate-400 text-center font-medium">
-        © 2026 {branding.companyName} • Sistem Presensi Kepegawaian Berbasis Wajah & GPS
+        © 2026 {activeBranding.companyName} • Sistem Presensi Kepegawaian Berbasis Wajah & GPS
       </p>
     </div>
   );

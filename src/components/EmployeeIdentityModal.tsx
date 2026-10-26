@@ -42,7 +42,7 @@ export const EmployeeIdentityModal: React.FC<EmployeeIdentityModalProps> = ({
   if (!isOpen) return null;
 
   const handleCopyNip = () => {
-    navigator.clipboard.writeText(employee.id.toUpperCase());
+    navigator.clipboard.writeText(employee.nip || employee.id);
     setCopiedId(true);
     audioNotificationService.playChime("normal");
     setTimeout(() => setCopiedId(false), 2000);
@@ -124,7 +124,7 @@ export const EmployeeIdentityModal: React.FC<EmployeeIdentityModalProps> = ({
               <p className="text-xs text-blue-100 font-medium truncate mt-0.5">{employee.position}</p>
               <div className="flex items-center gap-1.5 mt-1.5">
                 <span className="text-[10px] bg-white/20 text-white px-2 py-0.5 rounded-md font-mono tracking-wider font-semibold">
-                  NIP: {employee.id.toUpperCase()}
+                  NIP: {employee.nip || employee.id}
                 </span>
                 <button
                   onClick={handleCopyNip}

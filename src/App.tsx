@@ -89,6 +89,10 @@ import {
   syncWorkLocationsToFirestore,
   subscribeToWorkLocations,
   syncEmployeesToFirestore,
+  saveEmployeeToFirestore,
+  deleteEmployeeFromFirestore,
+  fetchEmployeesFromFirestore,
+  subscribeToEmployees,
 } from "./services/firebase";
 
 import {
@@ -235,21 +239,25 @@ export default function App() {
         if (remoteLocations && remoteLocations.length > 0) {
           setWorkLocations(remoteLocations);
           saveWorkLocations(remoteLocations);
-        } else {
-          const currentLocs = getStoredWorkLocations();
-          if (currentLocs && currentLocs.length > 0) {
-            syncWorkLocationsToFirestore(currentLocs).catch((e) =>
-              console.warn("Initial sync work locations to Firestore:", e)
-            );
-          }
         }
       })
       .catch((e) => console.warn("Fetch remote work locations:", e));
+
+    // Synchronize employees from Firestore (Firestore is single source of truth across all devices)
+    fetchEmployeesFromFirestore()
+      .then((remoteEmployees) => {
+        if (remoteEmployees && remoteEmployees.length > 0) {
+          setEmployees(remoteEmployees);
+          saveEmployees(remoteEmployees);
+        }
+      })
+      .catch((e) => console.warn("Fetch remote employees error:", e));
 
     let unsubAttendance: (() => void) | undefined;
     let unsubBranding: (() => void) | undefined;
     let unsubSchedule: (() => void) | undefined;
     let unsubWorkLocations: (() => void) | undefined;
+    let unsubEmployees: (() => void) | undefined;
 
     try {
       unsubAttendance = subscribeToAttendance(
@@ -313,11 +321,23 @@ export default function App() {
       console.warn("Firestore work locations subscription error:", e);
     }
 
+    try {
+      unsubEmployees = subscribeToEmployees((remoteEmployees) => {
+        if (remoteEmployees && remoteEmployees.length > 0) {
+          setEmployees(remoteEmployees);
+          saveEmployees(remoteEmployees);
+        }
+      });
+    } catch (e) {
+      console.warn("Firestore employees subscription error:", e);
+    }
+
     return () => {
       if (unsubAttendance) unsubAttendance();
       if (unsubBranding) unsubBranding();
       if (unsubSchedule) unsubSchedule();
       if (unsubWorkLocations) unsubWorkLocations();
+      if (unsubEmployees) unsubEmployees();
     };
   }, []);
 
@@ -691,8 +711,8 @@ export default function App() {
     }
     setEmployees(updated);
     saveEmployees(updated);
-    syncEmployeesToFirestore(updated).catch((e) =>
-      console.warn("Firestore employees sync error:", e)
+    saveEmployeeToFirestore(emp).catch((e) =>
+      console.warn("Firestore employee save error:", e)
     );
     if (currentEmployee.id === emp.id) {
       setCurrentEmployee(emp);
@@ -703,8 +723,8 @@ export default function App() {
     const updated = employees.filter((e) => e.id !== empId);
     setEmployees(updated);
     saveEmployees(updated);
-    syncEmployeesToFirestore(updated).catch((e) =>
-      console.warn("Firestore employees sync error:", e)
+    deleteEmployeeFromFirestore(empId).catch((e) =>
+      console.warn("Firestore employee delete error:", e)
     );
     if (currentEmployee.id === empId && updated.length > 0) {
       setCurrentEmployee(updated[0]);
