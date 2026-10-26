@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, lazy, Suspense } from "react";
 import {
   AttendanceRecord,
   CompanyBranding,
@@ -35,27 +35,61 @@ import {
 } from "./services/storage";
 import { audioNotificationService } from "./services/audioNotification";
 
-// Components
+// Core Initial View Components
 import { BannerSlider } from "./components/BannerSlider";
 import { QuickActions } from "./components/QuickActions";
-import { AttendanceModal } from "./components/AttendanceModal";
-import { LeaveRequestModal } from "./components/LeaveRequestModal";
-import { AdminChatModal } from "./components/AdminChatModal";
-import { MonthlyReportView } from "./components/MonthlyReportView";
-import { ManagerDashboard } from "./components/ManagerDashboard";
-import { AdminSettings } from "./components/AdminSettings";
-import { OfficeRadarModal } from "./components/OfficeRadarModal";
-import { RoleSelectorModal } from "./components/RoleSelectorModal";
-import { EmployeeAccountModal } from "./components/EmployeeAccountModal";
-import { EmployeeIdentityModal } from "./components/EmployeeIdentityModal";
-import { ChangePasswordModal } from "./components/ChangePasswordModal";
-import { UploadPhotoModal } from "./components/UploadPhotoModal";
-import { GoogleWorkspaceModal } from "./components/GoogleWorkspaceModal";
-import { PimpinanGpsModal } from "./components/PimpinanGpsModal";
-import { TempatTugasView } from "./components/TempatTugasView";
-import { PegawaiView } from "./components/PegawaiView";
 import { LoginPage } from "./components/LoginPage";
 import { PWAInstallButton } from "./components/PWAInstallButton";
+
+// Code-Split / Lazy Loaded Views & Modals for Fast Initial Page Boot
+const MonthlyReportView = lazy(() =>
+  import("./components/MonthlyReportView").then((m) => ({ default: m.MonthlyReportView }))
+);
+const ManagerDashboard = lazy(() =>
+  import("./components/ManagerDashboard").then((m) => ({ default: m.ManagerDashboard }))
+);
+const AdminSettings = lazy(() =>
+  import("./components/AdminSettings").then((m) => ({ default: m.AdminSettings }))
+);
+const TempatTugasView = lazy(() =>
+  import("./components/TempatTugasView").then((m) => ({ default: m.TempatTugasView }))
+);
+const PegawaiView = lazy(() =>
+  import("./components/PegawaiView").then((m) => ({ default: m.PegawaiView }))
+);
+const AttendanceModal = lazy(() =>
+  import("./components/AttendanceModal").then((m) => ({ default: m.AttendanceModal }))
+);
+const LeaveRequestModal = lazy(() =>
+  import("./components/LeaveRequestModal").then((m) => ({ default: m.LeaveRequestModal }))
+);
+const AdminChatModal = lazy(() =>
+  import("./components/AdminChatModal").then((m) => ({ default: m.AdminChatModal }))
+);
+const OfficeRadarModal = lazy(() =>
+  import("./components/OfficeRadarModal").then((m) => ({ default: m.OfficeRadarModal }))
+);
+const RoleSelectorModal = lazy(() =>
+  import("./components/RoleSelectorModal").then((m) => ({ default: m.RoleSelectorModal }))
+);
+const EmployeeAccountModal = lazy(() =>
+  import("./components/EmployeeAccountModal").then((m) => ({ default: m.EmployeeAccountModal }))
+);
+const EmployeeIdentityModal = lazy(() =>
+  import("./components/EmployeeIdentityModal").then((m) => ({ default: m.EmployeeIdentityModal }))
+);
+const ChangePasswordModal = lazy(() =>
+  import("./components/ChangePasswordModal").then((m) => ({ default: m.ChangePasswordModal }))
+);
+const UploadPhotoModal = lazy(() =>
+  import("./components/UploadPhotoModal").then((m) => ({ default: m.UploadPhotoModal }))
+);
+const GoogleWorkspaceModal = lazy(() =>
+  import("./components/GoogleWorkspaceModal").then((m) => ({ default: m.GoogleWorkspaceModal }))
+);
+const PimpinanGpsModal = lazy(() =>
+  import("./components/PimpinanGpsModal").then((m) => ({ default: m.PimpinanGpsModal }))
+);
 import {
   AuthSession,
   getStoredAuthSession,
@@ -123,6 +157,13 @@ import {
   Users,
   LogOut,
 } from "lucide-react";
+
+const ViewLoadingFallback = () => (
+  <div className="flex flex-col items-center justify-center p-12 space-y-3 min-h-[360px] animate-in fade-in">
+    <div className="w-9 h-9 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
+    <span className="text-xs font-semibold text-slate-500">Memuat halaman...</span>
+  </div>
+);
 
 export default function App() {
   // Authentication Session State (Null = Show Login Page)
@@ -229,6 +270,13 @@ export default function App() {
         if (remoteSchedule && remoteSchedule.checkInTime) {
           setSchedule(remoteSchedule);
           saveSchedule(remoteSchedule);
+        } else {
+          const localSchedule = getStoredSchedule();
+          if (localSchedule) {
+            saveScheduleToFirestore(localSchedule).catch((e) =>
+              console.warn("Initial sync schedule to Firestore:", e)
+            );
+          }
         }
       })
       .catch((e) => console.warn("Fetch remote schedule error:", e));
@@ -239,6 +287,13 @@ export default function App() {
         if (remoteLocations && remoteLocations.length > 0) {
           setWorkLocations(remoteLocations);
           saveWorkLocations(remoteLocations);
+        } else {
+          const localLocations = getStoredWorkLocations();
+          if (localLocations && localLocations.length > 0) {
+            syncWorkLocationsToFirestore(localLocations).catch((e) =>
+              console.warn("Initial sync work locations to Firestore:", e)
+            );
+          }
         }
       })
       .catch((e) => console.warn("Fetch remote work locations:", e));
@@ -249,6 +304,13 @@ export default function App() {
         if (remoteEmployees && remoteEmployees.length > 0) {
           setEmployees(remoteEmployees);
           saveEmployees(remoteEmployees);
+        } else {
+          const localEmployees = getStoredEmployees();
+          if (localEmployees && localEmployees.length > 0) {
+            syncEmployeesToFirestore(localEmployees).catch((e) =>
+              console.warn("Initial sync employees to Firestore:", e)
+            );
+          }
         }
       })
       .catch((e) => console.warn("Fetch remote employees error:", e));
@@ -748,6 +810,12 @@ export default function App() {
     });
     setEmployees(updated);
     saveEmployees(updated);
+    const target = updated.find((e) => e.id === employeeId);
+    if (target) {
+      saveEmployeeToFirestore(target).catch((e) =>
+        console.warn("Firestore employee quota sync error:", e)
+      );
+    }
   };
 
   // Broadcast 5-minute late warning to staff
@@ -1217,84 +1285,87 @@ export default function App() {
               )
             )}
 
-            {/* View: Monthly Report */}
-            {currentView === "report" && (
-              <MonthlyReportView
-                records={attendanceRecords}
-                employees={employees}
-                currentEmployee={currentEmployee}
-                branding={branding}
-                onOpenGoogleModal={() => setGoogleModalOpen(true)}
-              />
-            )}
+            {/* Code-Split Suspense Wrapper for Sub-Views */}
+            <Suspense fallback={<ViewLoadingFallback />}>
+              {/* View: Monthly Report */}
+              {currentView === "report" && (
+                <MonthlyReportView
+                  records={attendanceRecords}
+                  employees={employees}
+                  currentEmployee={currentEmployee}
+                  branding={branding}
+                  onOpenGoogleModal={() => setGoogleModalOpen(true)}
+                />
+              )}
 
-            {/* View: Manager Dashboard */}
-            {currentView === "manager" && (
-              <ManagerDashboard
-                leaveRequests={leaveRequests}
-                onReviewLeaveRequest={handleReviewLeaveRequest}
-                employees={employees}
-                todayRecords={todayRecords}
-                schedule={schedule}
-                onBroadcastLateWarning={handleBroadcastLateWarning}
-                onOpenSettings={() => setCurrentView("settings")}
-                onOpenReports={() => setCurrentView("report")}
-                onSwitchToEmployee={() => handleToggleRole("employee")}
-                onOpenTempatTugas={() => setCurrentView("tempat_tugas")}
-                onOpenPegawai={() => setCurrentView("pegawai")}
-              />
-            )}
+              {/* View: Manager Dashboard */}
+              {currentView === "manager" && (
+                <ManagerDashboard
+                  leaveRequests={leaveRequests}
+                  onReviewLeaveRequest={handleReviewLeaveRequest}
+                  employees={employees}
+                  todayRecords={todayRecords}
+                  schedule={schedule}
+                  onBroadcastLateWarning={handleBroadcastLateWarning}
+                  onOpenSettings={() => setCurrentView("settings")}
+                  onOpenReports={() => setCurrentView("report")}
+                  onSwitchToEmployee={() => handleToggleRole("employee")}
+                  onOpenTempatTugas={() => setCurrentView("tempat_tugas")}
+                  onOpenPegawai={() => setCurrentView("pegawai")}
+                />
+              )}
 
-            {/* View: Tempat Tugas & Titik GPS */}
-            {currentView === "tempat_tugas" && (
-              <TempatTugasView
-                workLocations={workLocations}
-                onSaveLocation={handleSaveWorkLocation}
-                onDeleteLocation={handleDeleteWorkLocation}
-                schedule={schedule}
-                employees={employees}
-                onBack={() => setCurrentView("manager")}
-              />
-            )}
+              {/* View: Tempat Tugas & Titik GPS */}
+              {currentView === "tempat_tugas" && (
+                <TempatTugasView
+                  workLocations={workLocations}
+                  onSaveLocation={handleSaveWorkLocation}
+                  onDeleteLocation={handleDeleteWorkLocation}
+                  schedule={schedule}
+                  employees={employees}
+                  onBack={() => setCurrentView("manager")}
+                />
+              )}
 
-            {/* View: Pegawai & Penempatan */}
-            {currentView === "pegawai" && (
-              <PegawaiView
-                employees={employees}
-                workLocations={workLocations}
-                onSaveEmployee={handleSaveEmployee}
-                onDeleteEmployee={handleDeleteEmployee}
-                onBack={() => setCurrentView("manager")}
-                onOpenTempatTugas={() => setCurrentView("tempat_tugas")}
-              />
-            )}
+              {/* View: Pegawai & Penempatan */}
+              {currentView === "pegawai" && (
+                <PegawaiView
+                  employees={employees}
+                  workLocations={workLocations}
+                  onSaveEmployee={handleSaveEmployee}
+                  onDeleteEmployee={handleDeleteEmployee}
+                  onBack={() => setCurrentView("manager")}
+                  onOpenTempatTugas={() => setCurrentView("tempat_tugas")}
+                />
+              )}
 
-            {/* View: Admin Settings */}
-            {currentView === "settings" && (
-              <AdminSettings
-                initialSubTab={adminSettingsSubTab}
-                schedule={schedule}
-                onSaveSchedule={handleSaveSchedule}
-                branding={branding}
-                onSaveBranding={handleSaveBranding}
-                employees={employees}
-                onUpdateEmployeeQuota={handleUpdateEmployeeQuota}
-                attendanceRecords={attendanceRecords}
-                onOpenTempatTugas={() => setCurrentView("tempat_tugas")}
-                onOpenPegawai={() => setCurrentView("pegawai")}
-              />
-            )}
+              {/* View: Admin Settings */}
+              {currentView === "settings" && (
+                <AdminSettings
+                  initialSubTab={adminSettingsSubTab}
+                  schedule={schedule}
+                  onSaveSchedule={handleSaveSchedule}
+                  branding={branding}
+                  onSaveBranding={handleSaveBranding}
+                  employees={employees}
+                  onUpdateEmployeeQuota={handleUpdateEmployeeQuota}
+                  attendanceRecords={attendanceRecords}
+                  onOpenTempatTugas={() => setCurrentView("tempat_tugas")}
+                  onOpenPegawai={() => setCurrentView("pegawai")}
+                />
+              )}
+            </Suspense>
       </main>
 
-      {/* Bottom Fixed Navigation Bar (Tailored to current role) */}
-      <nav className="sticky bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-slate-200/90 py-2 px-3 z-30 shadow-lg shrink-0">
+      {/* Bottom Fixed Navigation Bar (Tailored to current role with Keluar button on all roles) */}
+      <nav className="sticky bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-slate-200/90 py-1.5 px-2 sm:px-3 z-30 shadow-lg shrink-0">
         <div className="max-w-md sm:max-w-lg mx-auto flex items-center justify-around">
             {currentRole === "pimpinan" ? (
               <>
                 <button
                   id="tab-pimpinan-home"
                   onClick={() => setCurrentView("home")}
-                  className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-2xl transition-all cursor-pointer ${
+                  className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-2xl transition-all cursor-pointer ${
                     currentView === "home"
                       ? "text-purple-700 font-bold"
                       : "text-slate-400 hover:text-slate-600 font-medium"
@@ -1309,7 +1380,7 @@ export default function App() {
                 <button
                   id="tab-pimpinan-reports"
                   onClick={() => setCurrentView("report")}
-                  className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-2xl transition-all cursor-pointer ${
+                  className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-2xl transition-all cursor-pointer ${
                     currentView === "report"
                       ? "text-purple-700 font-bold"
                       : "text-slate-400 hover:text-slate-600 font-medium"
@@ -1326,17 +1397,17 @@ export default function App() {
                 <button
                   id="tab-quick-scan-pimpinan"
                   onClick={() => openAttendance("in")}
-                  className="relative -top-4 w-13 h-13 rounded-2xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-blue-600 text-white flex flex-col items-center justify-center shadow-lg shadow-purple-500/40 border-2 border-white active:scale-95 transition-all group cursor-pointer"
+                  className="relative -top-3 w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-blue-600 text-white flex flex-col items-center justify-center shadow-lg shadow-purple-500/40 border-2 border-white active:scale-95 transition-all group cursor-pointer"
                   title="Presensi Wajah & GPS Cepat (Pimpinan)"
                 >
-                  <Sparkles className="w-6 h-6 group-hover:rotate-12 transition-transform text-amber-300" />
+                  <Sparkles className="w-5 h-5 group-hover:rotate-12 transition-transform text-amber-300" />
                   <span className="text-[9px] font-bold mt-0.5">Absen</span>
                 </button>
 
                 <button
                   id="tab-pimpinan-gps"
                   onClick={() => setPimpinanGpsModalOpen(true)}
-                  className="flex flex-col items-center gap-0.5 py-1 px-3 rounded-2xl transition-all text-slate-400 hover:text-purple-700 font-medium cursor-pointer"
+                  className="flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-2xl transition-all text-slate-400 hover:text-purple-700 font-medium cursor-pointer"
                   title="Input Titik GPS dan Nama Kantor"
                 >
                   <div className="p-1.5 rounded-xl hover:bg-purple-50">
@@ -1348,7 +1419,7 @@ export default function App() {
                 <button
                   id="tab-chat-pimpinan"
                   onClick={() => setChatModalOpen(true)}
-                  className="flex flex-col items-center gap-0.5 py-1 px-3 rounded-2xl transition-all text-slate-400 hover:text-slate-600 font-medium relative cursor-pointer"
+                  className="flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-2xl transition-all text-slate-400 hover:text-slate-600 font-medium relative cursor-pointer"
                   title="Chat Admin"
                 >
                   <div className="p-1.5 rounded-xl hover:bg-slate-100">
@@ -1361,13 +1432,26 @@ export default function App() {
                     </span>
                   )}
                 </button>
+
+                {/* Tombol Keluar untuk Role Pimpinan */}
+                <button
+                  id="tab-pimpinan-logout"
+                  onClick={handleLogout}
+                  className="flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-2xl transition-all text-rose-500 hover:text-rose-700 hover:bg-rose-50/80 active:scale-95 cursor-pointer font-medium"
+                  title="Keluar dari Akun Pimpinan"
+                >
+                  <div className="p-1.5 rounded-xl text-rose-600 hover:bg-rose-100/60 transition-colors">
+                    <LogOut className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] font-bold text-rose-600">Keluar</span>
+                </button>
               </>
             ) : currentRole === "employee" ? (
               <>
                 <button
                   id="tab-home"
                   onClick={() => setCurrentView("home")}
-                  className={`flex flex-col items-center gap-0.5 py-1 px-4 rounded-2xl transition-all ${
+                  className={`flex flex-col items-center gap-0.5 py-1 px-3 sm:px-4 rounded-2xl transition-all ${
                     currentView === "home"
                       ? "text-blue-600 font-bold"
                       : "text-slate-400 hover:text-slate-600 font-medium"
@@ -1383,17 +1467,17 @@ export default function App() {
                 <button
                   id="tab-quick-scan"
                   onClick={() => openAttendance("in")}
-                  className="relative -top-4 w-13 h-13 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex flex-col items-center justify-center shadow-lg shadow-blue-500/40 border-2 border-white active:scale-95 transition-all group"
+                  className="relative -top-3 w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex flex-col items-center justify-center shadow-lg shadow-blue-500/40 border-2 border-white active:scale-95 transition-all group cursor-pointer"
                   title="Presensi Wajah & GPS Cepat"
                 >
-                  <Sparkles className="w-6 h-6 group-hover:rotate-12 transition-transform" />
+                  <Sparkles className="w-5 h-5 group-hover:rotate-12 transition-transform" />
                   <span className="text-[9px] font-bold mt-0.5">Absen</span>
                 </button>
 
                 <button
                   id="tab-chat"
                   onClick={() => setChatModalOpen(true)}
-                  className="flex flex-col items-center gap-0.5 py-1 px-4 rounded-2xl transition-all text-slate-400 hover:text-slate-600 font-medium relative"
+                  className="flex flex-col items-center gap-0.5 py-1 px-3 sm:px-4 rounded-2xl transition-all text-slate-400 hover:text-slate-600 font-medium relative cursor-pointer"
                 >
                   <div className="p-1.5 rounded-xl hover:bg-slate-100">
                     <MessageSquare className="w-5 h-5" />
@@ -1405,13 +1489,26 @@ export default function App() {
                     </span>
                   )}
                 </button>
+
+                {/* Tombol Keluar untuk Role Pegawai */}
+                <button
+                  id="tab-employee-logout"
+                  onClick={handleLogout}
+                  className="flex flex-col items-center gap-0.5 py-1 px-3 sm:px-4 rounded-2xl transition-all text-rose-500 hover:text-rose-700 hover:bg-rose-50/80 active:scale-95 cursor-pointer font-medium"
+                  title="Keluar dari Akun Pegawai"
+                >
+                  <div className="p-1.5 rounded-xl text-rose-600 hover:bg-rose-100/60 transition-colors">
+                    <LogOut className="w-5 h-5" />
+                  </div>
+                  <span className="text-[11px] font-bold text-rose-600">Keluar</span>
+                </button>
               </>
             ) : (
               <>
                 <button
                   id="tab-manager"
                   onClick={() => setCurrentView("manager")}
-                  className={`flex flex-col items-center gap-0.5 py-1 px-1.5 rounded-2xl transition-all relative ${
+                  className={`flex flex-col items-center gap-0.5 py-1 px-1 rounded-2xl transition-all relative ${
                     currentView === "manager"
                       ? "text-amber-600 font-bold"
                       : "text-slate-400 hover:text-slate-600 font-medium"
@@ -1432,7 +1529,7 @@ export default function App() {
                 <button
                   id="tab-tempat-tugas"
                   onClick={() => setCurrentView("tempat_tugas")}
-                  className={`flex flex-col items-center gap-0.5 py-1 px-1.5 rounded-2xl transition-all ${
+                  className={`flex flex-col items-center gap-0.5 py-1 px-1 rounded-2xl transition-all ${
                     currentView === "tempat_tugas"
                       ? "text-indigo-600 font-bold"
                       : "text-slate-400 hover:text-slate-600 font-medium"
@@ -1448,7 +1545,7 @@ export default function App() {
                 <button
                   id="tab-pegawai"
                   onClick={() => setCurrentView("pegawai")}
-                  className={`flex flex-col items-center gap-0.5 py-1 px-1.5 rounded-2xl transition-all ${
+                  className={`flex flex-col items-center gap-0.5 py-1 px-1 rounded-2xl transition-all ${
                     currentView === "pegawai"
                       ? "text-purple-600 font-bold"
                       : "text-slate-400 hover:text-slate-600 font-medium"
@@ -1464,7 +1561,7 @@ export default function App() {
                 <button
                   id="tab-report-all"
                   onClick={() => setCurrentView("report")}
-                  className={`flex flex-col items-center gap-0.5 py-1 px-1.5 rounded-2xl transition-all ${
+                  className={`flex flex-col items-center gap-0.5 py-1 px-1 rounded-2xl transition-all ${
                     currentView === "report"
                       ? "text-amber-600 font-bold"
                       : "text-slate-400 hover:text-slate-600 font-medium"
@@ -1480,7 +1577,7 @@ export default function App() {
                 <button
                   id="tab-settings"
                   onClick={() => setCurrentView("settings")}
-                  className={`flex flex-col items-center gap-0.5 py-1 px-1.5 rounded-2xl transition-all ${
+                  className={`flex flex-col items-center gap-0.5 py-1 px-1 rounded-2xl transition-all ${
                     currentView === "settings"
                       ? "text-amber-600 font-bold"
                       : "text-slate-400 hover:text-slate-600 font-medium"
@@ -1496,7 +1593,7 @@ export default function App() {
                 <button
                   id="tab-broadcast-alarm"
                   onClick={handleBroadcastLateWarning}
-                  className="flex flex-col items-center gap-0.5 py-1 px-1.5 rounded-2xl transition-all text-amber-600 hover:text-orange-600 font-medium"
+                  className="flex flex-col items-center gap-0.5 py-1 px-1 rounded-2xl transition-all text-amber-600 hover:text-orange-600 font-medium"
                   title="Broadcast Suara AI Peringatan 5 Menit"
                 >
                   <div className="p-1 rounded-xl hover:bg-amber-50">
@@ -1504,121 +1601,136 @@ export default function App() {
                   </div>
                   <span className="text-[9px] sm:text-[10px] text-orange-600 font-bold">Alarm</span>
                 </button>
+
+                {/* Tombol Keluar untuk Role Admin / Manager */}
+                <button
+                  id="tab-admin-logout"
+                  onClick={handleLogout}
+                  className="flex flex-col items-center gap-0.5 py-1 px-1 rounded-2xl transition-all text-rose-500 hover:text-rose-700 hover:bg-rose-50 active:scale-95 cursor-pointer font-medium"
+                  title="Keluar dari Akun Admin"
+                >
+                  <div className="p-1 rounded-xl text-rose-600 hover:bg-rose-100/50 transition-colors">
+                    <LogOut className="w-4 h-4" />
+                  </div>
+                  <span className="text-[9px] sm:text-[10px] text-rose-600 font-bold">Keluar</span>
+                </button>
               </>
             )}
           </div>
         </nav>
 
-      {/* MODALS */}
-      {/* 1. Biometric Face Detection & GPS Attendance Modal */}
-      <AttendanceModal
-        isOpen={attendanceModalOpen}
-        onClose={() => setAttendanceModalOpen(false)}
-        type={attendanceType}
-        employee={currentEmployee}
-        schedule={schedule}
-        branding={branding}
-        workLocations={workLocations}
-        onSaveAttendance={handleSaveAttendance}
-        onOpenLeaveRequest={() => {
-          setAttendanceModalOpen(false);
-          setLeaveModalOpen(true);
-        }}
-      />
+      {/* Code-Split Suspense Wrapper for Modals */}
+      <Suspense fallback={null}>
+        {/* 1. Biometric Face Detection & GPS Attendance Modal */}
+        <AttendanceModal
+          isOpen={attendanceModalOpen}
+          onClose={() => setAttendanceModalOpen(false)}
+          type={attendanceType}
+          employee={currentEmployee}
+          schedule={schedule}
+          branding={branding}
+          workLocations={workLocations}
+          onSaveAttendance={handleSaveAttendance}
+          onOpenLeaveRequest={() => {
+            setAttendanceModalOpen(false);
+            setLeaveModalOpen(true);
+          }}
+        />
 
-      {/* 2. Leave / Permission Request Modal */}
-      <LeaveRequestModal
-        isOpen={leaveModalOpen}
-        onClose={() => setLeaveModalOpen(false)}
-        employee={currentEmployee}
-        onSubmitRequest={handleSubmitLeaveRequest}
-      />
+        {/* 2. Leave / Permission Request Modal */}
+        <LeaveRequestModal
+          isOpen={leaveModalOpen}
+          onClose={() => setLeaveModalOpen(false)}
+          employee={currentEmployee}
+          onSubmitRequest={handleSubmitLeaveRequest}
+        />
 
-      {/* 3. Real-Time Admin HR Chat Modal */}
-      <AdminChatModal
-        isOpen={chatModalOpen}
-        onClose={() => setChatModalOpen(false)}
-        employee={currentEmployee}
-        messages={chatMessages}
-        onSendMessage={handleSendMessage}
-      />
+        {/* 3. Real-Time Admin HR Chat Modal */}
+        <AdminChatModal
+          isOpen={chatModalOpen}
+          onClose={() => setChatModalOpen(false)}
+          employee={currentEmployee}
+          messages={chatMessages}
+          onSendMessage={handleSendMessage}
+        />
 
-      {/* 4. Office GPS Radar Modal */}
-      <OfficeRadarModal
-        isOpen={radarModalOpen}
-        onClose={() => setRadarModalOpen(false)}
-        schedule={schedule}
-      />
+        {/* 4. Office GPS Radar Modal */}
+        <OfficeRadarModal
+          isOpen={radarModalOpen}
+          onClose={() => setRadarModalOpen(false)}
+          schedule={schedule}
+        />
 
-      {/* 5. Role Selection Modal */}
-      <RoleSelectorModal
-        isOpen={roleModalOpen}
-        onClose={() => setRoleModalOpen(false)}
-        currentRole={currentRole}
-        onSelectRole={handleToggleRole}
-        employees={employees}
-      />
+        {/* 5. Role Selection Modal */}
+        <RoleSelectorModal
+          isOpen={roleModalOpen}
+          onClose={() => setRoleModalOpen(false)}
+          currentRole={currentRole}
+          onSelectRole={handleToggleRole}
+          employees={employees}
+        />
 
-      {/* 6. Employee Account Modal (Akun: Edit Identitas, Upload Foto, Ubah Password) */}
-      <EmployeeAccountModal
-        isOpen={accountModalOpen}
-        onClose={() => setAccountModalOpen(false)}
-        employee={currentEmployee}
-        schedule={schedule}
-        onUpdateProfile={handleUpdateEmployeeProfile}
-        initialTab={accountInitialTab}
-      />
+        {/* 6. Employee Account Modal (Akun: Edit Identitas, Upload Foto, Ubah Password) */}
+        <EmployeeAccountModal
+          isOpen={accountModalOpen}
+          onClose={() => setAccountModalOpen(false)}
+          employee={currentEmployee}
+          schedule={schedule}
+          onUpdateProfile={handleUpdateEmployeeProfile}
+          initialTab={accountInitialTab}
+        />
 
-      {/* 7. Employee Identity Modal (Cek Identitas) */}
-      <EmployeeIdentityModal
-        isOpen={identityModalOpen}
-        onClose={() => setIdentityModalOpen(false)}
-        employee={currentEmployee}
-        schedule={schedule}
-        onOpenUploadPhoto={() => {
-          setIdentityModalOpen(false);
-          setAccountInitialTab("photo");
-          setAccountModalOpen(true);
-        }}
-        onOpenChangePassword={() => {
-          setIdentityModalOpen(false);
-          setAccountInitialTab("password");
-          setAccountModalOpen(true);
-        }}
-        onLogout={handleLogout}
-      />
+        {/* 7. Employee Identity Modal (Cek Identitas) */}
+        <EmployeeIdentityModal
+          isOpen={identityModalOpen}
+          onClose={() => setIdentityModalOpen(false)}
+          employee={currentEmployee}
+          schedule={schedule}
+          onOpenUploadPhoto={() => {
+            setIdentityModalOpen(false);
+            setAccountInitialTab("photo");
+            setAccountModalOpen(true);
+          }}
+          onOpenChangePassword={() => {
+            setIdentityModalOpen(false);
+            setAccountInitialTab("password");
+            setAccountModalOpen(true);
+          }}
+          onLogout={handleLogout}
+        />
 
-      {/* 8. Change Password Modal (Ubah Password) */}
-      <ChangePasswordModal
-        isOpen={changePasswordModalOpen}
-        onClose={() => setChangePasswordModalOpen(false)}
-        employee={currentEmployee}
-      />
+        {/* 8. Change Password Modal (Ubah Password) */}
+        <ChangePasswordModal
+          isOpen={changePasswordModalOpen}
+          onClose={() => setChangePasswordModalOpen(false)}
+          employee={currentEmployee}
+        />
 
-      {/* 9. Upload Photo Modal (Upload Foto) */}
-      <UploadPhotoModal
-        isOpen={uploadPhotoModalOpen}
-        onClose={() => setUploadPhotoModalOpen(false)}
-        employee={currentEmployee}
-        onSavePhoto={handleSaveEmployeePhoto}
-      />
+        {/* 9. Upload Photo Modal (Upload Foto) */}
+        <UploadPhotoModal
+          isOpen={uploadPhotoModalOpen}
+          onClose={() => setUploadPhotoModalOpen(false)}
+          employee={currentEmployee}
+          onSavePhoto={handleSaveEmployeePhoto}
+        />
 
-      {/* 10. Google Workspace Modal (Google Sheets & Google Drive Integration) */}
-      <GoogleWorkspaceModal
-        isOpen={googleModalOpen}
-        onClose={() => setGoogleModalOpen(false)}
-        attendanceRecords={attendanceRecords}
-        branding={branding}
-        onShowToast={(msg) => handleTriggerVoiceToast("Google Workspace", msg)}
-      />
+        {/* 10. Google Workspace Modal (Google Sheets & Google Drive Integration) */}
+        <GoogleWorkspaceModal
+          isOpen={googleModalOpen}
+          onClose={() => setGoogleModalOpen(false)}
+          attendanceRecords={attendanceRecords}
+          branding={branding}
+          onShowToast={(msg) => handleTriggerVoiceToast("Google Workspace", msg)}
+        />
 
-      {/* 11. Pimpinan GPS & Office Settings Modal */}
-      <PimpinanGpsModal
-        isOpen={pimpinanGpsModalOpen}
-        onClose={() => setPimpinanGpsModalOpen(false)}
-        schedule={schedule}
-        onSaveSchedule={handleSaveSchedule}
-      />
+        {/* 11. Pimpinan GPS & Office Settings Modal */}
+        <PimpinanGpsModal
+          isOpen={pimpinanGpsModalOpen}
+          onClose={() => setPimpinanGpsModalOpen(false)}
+          schedule={schedule}
+          onSaveSchedule={handleSaveSchedule}
+        />
+      </Suspense>
     </div>
   );
 }
