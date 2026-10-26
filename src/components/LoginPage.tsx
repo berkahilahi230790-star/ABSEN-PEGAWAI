@@ -173,6 +173,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-900 text-white p-6 relative overflow-hidden">
           <div className="absolute right-0 top-0 w-32 h-32 bg-white/10 rounded-full blur-2xl pointer-events-none" />
           
+          <div className="flex items-center gap-4 relative z-10">
             <div className="w-14 h-14 rounded-2xl bg-white p-1.5 shadow-md flex items-center justify-center shrink-0 border border-white/40 overflow-hidden">
               <img
                 src={sanitizeLogoUrl(activeBranding.logoUrl)}
